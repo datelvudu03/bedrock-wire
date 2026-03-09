@@ -9,6 +9,6 @@ Reaktivní HTTP klient (Reactor/WebClient) se sdílenými connection pooly per t
 Použitelný samostatně jako stavební blok pro jakýkoliv HTTP transport.
 
 ## bedrock-wire-monitor
-Konfigurovatelný HTTP monitor postavený na bedrock-http-client. 
+Konfigurovatelný HTTP monitor postavený na bedrock-wire-client. 
 Spouští HTTP checky v pravidelných intervalech, validuje odpovědi (HTTP status, obsah, regex, doba odezvy) a reportuje výsledky přes MonitorResultListener. 
 Konfigurace přes properties namespace monitor.*.
