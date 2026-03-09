@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>cz.syntea.maven.pom</groupId>
+        <artifactId>syntea-maven-pom-springboot</artifactId>
+        <version>8.0.0-SNAPSHOT</version>
+    </parent>    
+
+    <groupId>cz.syntea.bedrock</groupId>
+    <artifactId>syntea-bedrock-wire</artifactId>
+    <version>${revision}${changelist}</version>
+    <packaging>pom</packaging>
+    <name>bedrock-wire</name>
+    <description>
+       bedrock-wire         - Java knihovna pro spolehlivé HTTP volání a monitorování HTTP endpointů. Poskytuje sdílené connection pooly, správu TLS a konfigurovatelný monitoring s validací odpovědí.
+       bedrock-wire-client  - Reaktivní HTTP klient (Reactor/WebClient) se sdílenými connection pooly per transport target, správou TLS profilů včetně mTLS a centrálním HttpClientRegistry. Použitelný samostatně jako stavební blok pro jakýkoliv HTTP transport.
+       bedrock-wire-monitor - Konfigurovatelný HTTP monitor postavený na bedrock-http-client. Spouští HTTP checky v pravidelných intervalech, validuje odpovědi (HTTP status, obsah, regex, doba odezvy) a reportuje výsledky přes MonitorResultListener. Konfigurace přes properties namespace monitor.*.
+    </description>
+
+    <properties>
+        <revision>1.0.0</revision>
+    </properties>
+
+    <modules>
+        <module>bedrock-wire-client</module>
+        <module>bedrock-wire-monitor</module>
+    </modules>
+
+</project>

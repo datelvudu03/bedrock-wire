@@ -1,0 +1,30 @@
+
+# /
+/.idea
+/*.ipr
+/*.iws
+/*.iml
+/*.pyc
+/#*
+/overlays
+/target
+/nbproject
+/local
+/.classpath
+/.project
+/.settings
+/.wtpmodules
+
+# /_info/
+**/_info/out
+**/_info/~*
+
+# logy
+**/logs/
+
+# Syntea lokalni konfigurace
+**/cfg/local/
+
+# Spring properties
+**/src/main/resources/application-local.properties
+**/src/test/resources/application-local.properties

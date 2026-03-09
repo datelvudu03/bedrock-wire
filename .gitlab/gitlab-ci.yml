@@ -1,0 +1,4 @@
+include:
+  - project: 'cicd/gitlab/cicd-gitlab-citemplates'
+    ref: 'main'
+    file: java/java.ci-pipeline.lib.Docker-jdk21.gitlab-ci.yml

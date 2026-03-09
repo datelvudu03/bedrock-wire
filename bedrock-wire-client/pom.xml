@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>cz.syntea.bedrock</groupId>
+        <artifactId>syntea-bedrock-wire</artifactId>
+        <version>${revision}${changelist}</version>
+    </parent>
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>syntea-bedrock-wire-client</artifactId>
+    <name>bedrock-wire-client</name>
+    <packaging>jar</packaging>
+
+    <description>
+        Reaktivní HTTP klient (Reactor/WebClient) se sdílenými connection pooly per transport target,
+        správou TLS profilů včetně mTLS a centrálním HttpClientRegistry.
+        Použitelný samostatně jako stavební blok pro jakýkoliv HTTP transport.
+    </description>
+
+    <properties>
+    </properties>
+
+    <dependencies>
+        <!-- ******** SYNTEA ARTEFAKTY ********* -->
+        <!-- ******** CIZI ARTEFAKTY ********* -->
+        <!-- ******** TESTS ********* -->
+    </dependencies>
+
+</project>

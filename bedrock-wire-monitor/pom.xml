@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>cz.syntea.bedrock</groupId>
+        <artifactId>syntea-bedrock-wire</artifactId>
+        <version>${revision}${changelist}</version>
+    </parent>
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>syntea-bedrock-wire-monitor</artifactId>
+    <name>bedrock-wire-monitor</name>
+    <packaging>jar</packaging>
+
+    <description>
+        Konfigurovatelný HTTP monitor postavený na bedrock-wire-client.
+        Spouští HTTP checky v pravidelných intervalech, validuje odpovědi (HTTP status, obsah, regex, doba odezvy)
+        a reportuje výsledky přes MonitorResultListener.
+        Konfigurace přes properties namespace monitor.*.
+    </description>
+
+    <properties>
+    </properties>
+
+    <dependencies>
+        <!-- ******** SYNTEA ARTEFAKTY ********* -->
+        <!-- ******** CIZI ARTEFAKTY ********* -->
+        <!-- ******** TESTS ********* -->
+    </dependencies>
+
+</project>
