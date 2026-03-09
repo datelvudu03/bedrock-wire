@@ -1,8 +1,8 @@
 # bedrock-wire
 
-## bedrock-wire 
-Java knihovna pro spolehlivé HTTP volání a monitorování HTTP endpointů. 
-Poskytuje sdílené connection pooly, správu TLS a konfigurovatelný monitoring s validací odpovědí.
+Modulární projekt pro HTTP komunikaci a monitorování HTTP endpointů.
+Obsahuje dvě knihovny: bedrock-wire-client (transportní vrstva) a bedrock-wire-monitor (monitorovací vrstva).
+Podrobná specifikace je v souboru [bedrock-wire-spec.md](bedrock-wire-spec.md).
 
 ## bedrock-wire-client
 Reaktivní HTTP klient (Reactor/WebClient) se sdílenými connection pooly per transport target, správou TLS profilů včetně mTLS a centrálním HttpClientRegistry. 
