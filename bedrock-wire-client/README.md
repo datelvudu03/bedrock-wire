@@ -209,7 +209,7 @@ Application property: `bedrock.wire.client.max-clients=100`
 
 ### Logging
 
-All log output uses a single logger name: `bedrock.wire.client`. No other logger is used in the library. Every log event populates MDC fields in `try/finally` to prevent leakage across reactive schedulers.
+All log output uses a single logger name: `io.bedrock.wire.client`. No other logger is used in the library. Every log event populates MDC fields in `try/finally` to prevent leakage across reactive schedulers.
 
 | Event                               | Level | MDC fields                         |
 |-------------------------------------|-------|------------------------------------|
@@ -227,7 +227,7 @@ All log output uses a single logger name: `bedrock.wire.client`. No other logger
 Filter in your logging config:
 
 ```xml
-<logger name="bedrock.wire.client" level="INFO"/>
+<logger name="io.bedrock.wire.client" level="INFO"/>
 ```
 
 ### Metrics
@@ -272,7 +272,6 @@ Never use `defaultHeaders` for trace context — those are static and would stam
 | #  | Description                                                                                     |
 |----|-------------------------------------------------------------------------------------------------|
 | 1  | Server-declared non-UTF-8 charset in `Content-Type` is silently ignored; UTF-8 is always used   |
-| 2  | Response body is fully buffered before the size check — does not protect against OOM for payloads near heap limit |
-| 3  | Certificate rotation requires application restart and full registry re-creation                  |
-| 4  | Pool-exhausted log shows the configured `maxPendingRequests` ceiling, not the live queue depth (unavailable from Netty) |
-| 5  | Multi-value header merge semantics when the same key appears in both `defaultHeaders` and `HttpRequest.headers` are not fully specified |
+| 2  | Certificate rotation requires application restart and full registry re-creation                  |
+| 3  | Pool-exhausted log shows the configured `maxPendingRequests` ceiling, not the live queue depth (unavailable from Netty) |
+| 4  | Multi-value header merge semantics when the same key appears in both `defaultHeaders` and `HttpRequest.headers` are not fully specified |

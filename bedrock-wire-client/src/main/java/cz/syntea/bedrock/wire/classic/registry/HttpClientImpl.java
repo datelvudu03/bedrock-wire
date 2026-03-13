@@ -16,13 +16,17 @@ import cz.syntea.bedrock.wire.classic.model.TransportTarget;
 import cz.syntea.bedrock.wire.classic.model.enums.RequestOutcome;
 import cz.syntea.bedrock.wire.classic.observability.WireMetricsCollector;
 import io.netty.channel.ConnectTimeoutException;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.PrematureCloseException;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -56,7 +60,7 @@ import java.util.function.BooleanSupplier;
  *
  * <h2>Logging</h2>
  * All logging goes through {@link WireLogger}, which enforces the logger name
- * {@code bedrock.wire.client} and populates MDC fields per spec §1.12.
+ * {@code io.bedrock.wire.client} and populates MDC fields per spec §1.12.
  * {@code @Slf4j} is intentionally NOT used in this class.
  *
  * <h2>Header merge order (highest priority wins)</h2>
@@ -75,6 +79,22 @@ import java.util.function.BooleanSupplier;
  *   <li>Non-empty body: sent via {@code bodyValue(String)} as UTF-8 text.</li>
  * </ul>
  *
+ * <h2>Response body size limit (streaming)</h2>
+ * The response body is consumed via {@code bodyToFlux(DataBuffer.class)} and accumulated
+ * chunk-by-chunk. Each chunk's byte count is tracked against
+ * {@link HttpClientConfig#getMaxResponseBodySize()}. If the running total exceeds the limit,
+ * the subscription is cancelled immediately — no further data is downloaded and no
+ * oversized {@code String} is allocated on the heap. This protects against OOM for
+ * unexpectedly large responses.
+ *
+ * <p>Raw bytes are accumulated in a {@link ByteArrayOutputStream} and decoded to a UTF-8
+ * {@code String} only once after the last chunk. This avoids the multi-byte character
+ * boundary problem that would occur if each chunk were decoded independently (e.g. a
+ * two-byte {@code ř} split across two buffers).
+ *
+ * <p>Every {@link DataBuffer} is released via {@link DataBufferUtils#release} on all paths
+ * (success, size exceeded, error, cancel) to prevent Netty native memory leaks.
+ *
  * <h2>Duration semantics</h2>
  * <ul>
  *   <li>{@link HttpResponse#getDuration()} — from sending the request to last byte of body.</li>
@@ -83,13 +103,12 @@ import java.util.function.BooleanSupplier;
  */
 class HttpClientImpl implements HttpClient {
 
-    private static final String URL = " url=";
-    private final HttpClientConfig config;
-    private final TransportTarget transportTarget;  // needed for pool-exhausted log (spec §1.12)
-    private final WebClient webClient;
+    private final HttpClientConfig     config;
+    private final TransportTarget      transportTarget;  // needed for pool-exhausted log (spec §1.12)
+    private final WebClient            webClient;
     private final WireMetricsCollector metricsCollector;
-    private final BooleanSupplier registryClosedChecker;
-    private final AtomicInteger inFlightCounter;
+    private final BooleanSupplier      registryClosedChecker;
+    private final AtomicInteger        inFlightCounter;
 
     HttpClientImpl(
             HttpClientConfig config,
@@ -98,66 +117,15 @@ class HttpClientImpl implements HttpClient {
             WireMetricsCollector metricsCollector,
             BooleanSupplier registryClosedChecker,
             AtomicInteger inFlightCounter) {
-        this.config = config;
-        this.transportTarget = transportTarget;
-        this.webClient = webClient;
-        this.metricsCollector = metricsCollector;
+        this.config                = config;
+        this.transportTarget       = transportTarget;
+        this.webClient             = webClient;
+        this.metricsCollector      = metricsCollector;
         this.registryClosedChecker = registryClosedChecker;
-        this.inFlightCounter = inFlightCounter;
+        this.inFlightCounter       = inFlightCounter;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
-
-    /**
-     * Computes the UTF-8 encoded byte length of a string without allocating a byte array.
-     * Each char is counted based on its Unicode code point: 1 byte for ASCII,
-     * 2 for U+0080–U+07FF, 3 for BMP (including surrogates handled via pairs), 4 for supplementary.
-     */
-    private static int utf8ByteLength(String s) {
-        int count = 0;
-        for (int i = 0, len = s.length(); i < len; i++) {
-            char c = s.charAt(i);
-            if (c <= 0x7F) {
-                count++;
-            } else if (c <= 0x7FF) {
-                count += 2;
-            } else if (Character.isHighSurrogate(c) && i + 1 < len
-                    && Character.isLowSurrogate(s.charAt(i + 1))) {
-                count += 4;
-                i++; // skip low surrogate
-            } else {
-                count += 3;
-            }
-        }
-        return count;
-    }
-
-    // ── Request validation ────────────────────────────────────────────────────
-
-    private static RequestOutcome outcomeFromError(Throwable e) {
-        if (e instanceof RequestTimeoutException) return RequestOutcome.TIMEOUT;
-        if (e instanceof ReadTimeoutException) return RequestOutcome.READ_TIMEOUT;
-        if (e instanceof PoolAcquisitionTimeoutException) return RequestOutcome.POOL_EXHAUSTED;
-        if (e instanceof ResponseSizeExceededException) return RequestOutcome.SIZE_EXCEEDED;
-        if (e instanceof RedirectNotSupportedException) return RequestOutcome.REDIRECT_REJECTED;
-        if (e instanceof RegistryClosedException) return RequestOutcome.REGISTRY_CLOSED;
-        return RequestOutcome.TRANSPORT_ERROR;
-    }
-
-    // ── URL construction ──────────────────────────────────────────────────────
-
-    private static Duration elapsed(long startNanos) {
-        return Duration.ofNanos(System.nanoTime() - startNanos);
-    }
-
-    // ── WebClient call ────────────────────────────────────────────────────────
-
-    private static Map<String, List<String>> copyHeaders(HttpHeaders springHeaders) {
-        Map<String, List<String>> result = LinkedHashMap.newLinkedHashMap(springHeaders.size());
-        springHeaders.forEach((name, values) ->
-                result.put(name, List.copyOf(values)));
-        return Collections.unmodifiableMap(result);
-    }
 
     @Override
     public Mono<HttpResponse> execute(HttpRequest request) {
@@ -192,19 +160,17 @@ class HttpClientImpl implements HttpClient {
         // between the synchronous check above and actual subscription.
         return Mono.defer(() -> {
                     if (registryClosedChecker.getAsBoolean()) {
-                        return Mono.error(
+                        return Mono.<HttpResponse>error(
                                 new RegistryClosedException(config.getClientId()));
                     }
                     return buildWebClientCall(request, fullUri);
                 })
-                // ── enforce max response body size ────────────────────────────
-                .flatMap(response -> enforceBodySizeLimit(response, fullUri))
                 // ── map all Netty / JDK exceptions → BedrockWireException ─────
                 .onErrorMap(this::shouldWrap, e -> wrapException(e, fullUri, elapsed(metricsStart[0])))
                 // ── metrics ───────────────────────────────────────────────────
                 .doOnSuccess(r -> recordMetrics(request.getMethod(), r.getStatusCode(),
                         elapsed(metricsStart[0]), RequestOutcome.SUCCESS))
-                .doOnError(e -> recordMetrics(request.getMethod(), 0,
+                .doOnError(e   -> recordMetrics(request.getMethod(), 0,
                         elapsed(metricsStart[0]), outcomeFromError(e)))
                 // ── subscription-time setup ───────────────────────────────────
                 // doOnSubscribe fires once per subscription, before any network activity.
@@ -220,6 +186,8 @@ class HttpClientImpl implements HttpClient {
                 // Placed after doOnSubscribe so the decrement always has a matching increment.
                 .doFinally(sig -> inFlightCounter.decrementAndGet());
     }
+
+    // ── Request validation ────────────────────────────────────────────────────
 
     private void validateRequest(HttpRequest request) {
         if (request == null) {
@@ -242,24 +210,24 @@ class HttpClientImpl implements HttpClient {
         }
     }
 
+    // ── URL construction ──────────────────────────────────────────────────────
+
     private URI buildFullUri(HttpRequest request) {
         return URI.create(config.getBaseUrl().toString() + request.getUrl().toString());
     }
+
+    // ── WebClient call ────────────────────────────────────────────────────────
 
     private Mono<HttpResponse> buildWebClientCall(HttpRequest request, URI fullUri) {
         org.springframework.http.HttpMethod springMethod =
                 org.springframework.http.HttpMethod.valueOf(request.getMethod().name());
 
+        final int limit = config.getMaxResponseBodySize();
+
         // Mono.defer re-executes this lambda on each subscription, so System.nanoTime()
         // is captured once per request immediately before the WebClient call is assembled —
         // after pool acquisition, right as the request is sent.
         // This becomes HttpResponse.duration per spec §1.8.2.
-        //
-        // Why NOT doOnSubscribe on RequestHeadersSpec:
-        //   RequestHeadersSpec is not a Publisher — it has no doOnSubscribe method.
-        // Why NOT doOnSubscribe on the Mono from exchangeToMono:
-        //   It fires before pool acquisition, so it would include pool-wait time,
-        //   violating the spec definition of duration.
         return Mono.defer(() -> {
             final long requestStart = System.nanoTime();
 
@@ -274,14 +242,53 @@ class HttpClientImpl implements HttpClient {
                                             config.getClientId(), fullUri, statusCode)));
                         }
 
-                        return clientResponse.bodyToMono(String.class)
-                                .defaultIfEmpty("")
-                                .map(body -> HttpResponse.builder()
-                                        .statusCode(statusCode)
-                                        .headers(copyHeaders(clientResponse.headers().asHttpHeaders()))
-                                        .responseBody(body)
-                                        .duration(elapsed(requestStart))
-                                        .build());
+                        Map<String, List<String>> headers =
+                                copyHeaders(clientResponse.headers().asHttpHeaders());
+
+                        // Stream the body chunk-by-chunk, enforcing the size limit as
+                        // data arrives. If the limit is exceeded, the Flux is cancelled
+                        // and no further data is downloaded from the server.
+                        //
+                        // Raw bytes are accumulated in a ByteArrayOutputStream and
+                        // decoded to UTF-8 only once after the last chunk. This avoids
+                        // multi-byte character boundary issues (e.g. ř split across
+                        // two DataBuffers).
+                        final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                        final int[] totalBytes = {0};
+
+                        return clientResponse.bodyToFlux(DataBuffer.class)
+                                .doOnNext(dataBuffer -> {
+                                    int chunkSize = dataBuffer.readableByteCount();
+                                    totalBytes[0] += chunkSize;
+
+                                    if (totalBytes[0] > limit) {
+                                        // Release this chunk before signalling error
+                                        DataBufferUtils.release(dataBuffer);
+                                        WireLogger.responseSizeExceeded(
+                                                config.getClientId(), fullUri,
+                                                totalBytes[0], limit);
+                                        throw new ResponseSizeExceededException(limit);
+                                    }
+
+                                    // Copy bytes and release the DataBuffer immediately
+                                    // to return Netty's off-heap memory to the pool.
+                                    byte[] bytes = new byte[chunkSize];
+                                    dataBuffer.read(bytes);
+                                    DataBufferUtils.release(dataBuffer);
+                                    buffer.write(bytes, 0, chunkSize);
+                                })
+                                // Safety net: release any DataBuffer that wasn't consumed
+                                // by doOnNext (e.g. due to cancel or upstream error).
+                                .doOnDiscard(DataBuffer.class, DataBufferUtils::release)
+                                .then(Mono.fromSupplier(() ->
+                                        HttpResponse.builder()
+                                                .statusCode(statusCode)
+                                                .headers(headers)
+                                                .responseBody(buffer.size() > 0
+                                                        ? buffer.toString(StandardCharsets.UTF_8)
+                                                        : "")
+                                                .duration(elapsed(requestStart))
+                                                .build()));
                     });
         });
     }
@@ -313,6 +320,7 @@ class HttpClientImpl implements HttpClient {
         return bodySpec.body(BodyInserters.empty());
     }
 
+
     /**
      * Applies headers in priority order: defaultHeaders → trace → request (highest).
      * RFC 7230 case-insensitive semantics enforced by Spring's {@link HttpHeaders}.
@@ -343,23 +351,11 @@ class HttpClientImpl implements HttpClient {
         }
     }
 
-    private Mono<HttpResponse> enforceBodySizeLimit(HttpResponse response, URI fullUri) {
-        int byteLength = utf8ByteLength(response.getResponseBody());
-        int limit = config.getMaxResponseBodySize();
-        if (byteLength > limit) {
-            WireLogger.responseSizeExceeded(config.getClientId(), fullUri, byteLength, limit);
-            return Mono.error(new ResponseSizeExceededException(limit));
-        }
-        return Mono.just(response);
-    }
 
-    /**
-     * Pass already-wrapped exceptions through; wrap everything else.
-     */
+    /** Pass already-wrapped exceptions through; wrap everything else. */
     private boolean shouldWrap(Throwable e) {
         return !(e instanceof BedrockWireException);
     }
-
 
     /**
      * Maps JDK / Netty / Reactor Netty exceptions to {@link BedrockWireException} subtypes
@@ -397,27 +393,27 @@ class HttpClientImpl implements HttpClient {
 
         if (e instanceof ConnectTimeoutException) {
             return new TransportException(
-                    "Connect timeout: clientId=" + clientId + URL + fullUri, e);
+                    "Connect timeout: clientId=" + clientId + " url=" + fullUri, e);
         }
 
         if (e instanceof PrematureCloseException) {
             return new TransportException(
-                    "Connection closed prematurely: clientId=" + clientId + URL + fullUri, e);
+                    "Connection closed prematurely: clientId=" + clientId + " url=" + fullUri, e);
         }
 
         if (e instanceof java.net.ConnectException) {
             return new TransportException(
-                    "Connection refused: clientId=" + clientId + URL + fullUri, e);
+                    "Connection refused: clientId=" + clientId + " url=" + fullUri, e);
         }
 
         if (e instanceof java.io.IOException) {
             return new TransportException(
-                    "IO error: clientId=" + clientId + URL + fullUri, e);
+                    "IO error: clientId=" + clientId + " url=" + fullUri, e);
         }
 
         // Fallback — all execute() errors MUST be BedrockWireException subtypes
         return new TransportException(
-                "Unexpected error: clientId=" + clientId + URL + fullUri, e);
+                "Unexpected error: clientId=" + clientId + " url=" + fullUri, e);
     }
 
     private void recordMetrics(HttpMethod method, int statusCode,
@@ -428,5 +424,26 @@ class HttpClientImpl implements HttpClient {
         } catch (Exception ignored) {
             // Metrics failures MUST NOT affect request flow
         }
+    }
+
+    private static RequestOutcome outcomeFromError(Throwable e) {
+        if (e instanceof RequestTimeoutException)         return RequestOutcome.TIMEOUT;
+        if (e instanceof ReadTimeoutException)            return RequestOutcome.READ_TIMEOUT;
+        if (e instanceof PoolAcquisitionTimeoutException) return RequestOutcome.POOL_EXHAUSTED;
+        if (e instanceof ResponseSizeExceededException)   return RequestOutcome.SIZE_EXCEEDED;
+        if (e instanceof RedirectNotSupportedException)   return RequestOutcome.REDIRECT_REJECTED;
+        if (e instanceof RegistryClosedException)         return RequestOutcome.REGISTRY_CLOSED;
+        return RequestOutcome.TRANSPORT_ERROR;
+    }
+
+    private static Duration elapsed(long startNanos) {
+        return Duration.ofNanos(System.nanoTime() - startNanos);
+    }
+
+    private static Map<String, List<String>> copyHeaders(HttpHeaders springHeaders) {
+        Map<String, List<String>> result = LinkedHashMap.newLinkedHashMap(springHeaders.size());
+        springHeaders.forEach((name, values) ->
+                result.put(name, List.copyOf(values)));
+        return Collections.unmodifiableMap(result);
     }
 }

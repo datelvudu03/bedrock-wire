@@ -10,7 +10,6 @@ import lombok.Value;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-
 /**
  * Result of a completed HTTP request returned by
  * {@link cz.syntea.bedrock.wire.classic.registry.HttpClient#execute(HttpRequest)}.
@@ -35,40 +34,38 @@ import java.util.Map;
 @Builder
 public class HttpResponse {
 
-    /**
-     * Shared mapper for {@link #toString()}. Handles {@link Duration} via JavaTimeModule.
-     */
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .enable(SerializationFeature.INDENT_OUTPUT);
-    /**
-     * HTTP status code (e.g. 200, 404). Never zero.
-     */
+    /** HTTP status code (e.g. 200, 404). Never zero. */
     int statusCode;
-    /**
-     * Response headers as returned by the server. Never {@code null}.
-     */
+
+    /** Response headers as returned by the server. Never {@code null}. */
     Map<String, List<String>> headers;
+
     /**
      * Response body decoded as UTF-8.
      * Empty string when there is no body; never {@code null}.
      *
-     * <p><strong>Buffering:</strong> the entire response body is accumulated in memory by
-     * {@code bodyToMono(String.class)} before {@code execute()} emits this object.
-     * The size check against {@link cz.syntea.bedrock.wire.classic.config.HttpClientConfig#getMaxResponseBodySize()}
-     * runs <em>after</em> buffering completes. This means an oversized body occupies heap
-     * memory between the last byte arriving and the size check firing.
+     * <p><strong>Streaming:</strong> the response body is consumed chunk-by-chunk via
+     * {@code bodyToFlux(DataBuffer.class)}. Each chunk's byte count is checked against
+     * {@link cz.syntea.bedrock.wire.classic.config.HttpClientConfig#getMaxResponseBodySize()}.
+     * If the running total exceeds the limit, the download is cancelled immediately —
+     * no oversized body is allocated on the heap.
      *
-     * <p>For payloads close to or exceeding the JVM heap limit, this library is not
-     * appropriate. Consider a streaming client (e.g. raw WebClient with
-     * {@code bodyToFlux(DataBuffer.class)}) for large or unbounded responses.
+     * <p>For payloads within the configured limit, the final {@code String} is decoded
+     * from the accumulated raw bytes in a single UTF-8 pass, avoiding multi-byte
+     * character boundary issues.
      */
     String responseBody;
+
     /**
      * Elapsed time from sending the request to receiving the last byte of the
-     * response body (i.e., total round-trip time including body transfer).
+     * response body (i.e. total round-trip time including body transfer).
      */
     Duration duration;
+
+    /** Shared mapper for {@link #toString()}. Handles {@link Duration} via JavaTimeModule. */
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .enable(SerializationFeature.INDENT_OUTPUT);
 
     /**
      * Pretty-printed JSON representation for logging.
