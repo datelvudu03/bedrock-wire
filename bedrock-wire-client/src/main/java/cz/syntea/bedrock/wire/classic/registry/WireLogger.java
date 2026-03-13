@@ -8,20 +8,12 @@ import java.net.URI;
 import java.time.Duration;
 
 /**
- * Internal structured logger for all {@code bedrock-wire-client} log output.
+ * Single structured logger for all {@code bedrock-wire-client} output.
+ * Logger name: {@code bedrock.wire.client} (fixed per spec §1.12).
+ * {@code @Slf4j} must not be used elsewhere in this module.
  *
- * <h3>Logger name contract (spec §1.12)</h3>
- * All log output MUST use logger name {@code bedrock.wire.client} for consistent
- * filtering by operators. This class is the single place where that logger is created;
- * {@code @Slf4j} MUST NOT be used in any other class in this module because Lombok
- * derives the logger name from the class name, which would violate the spec.
+ * <p>MDC fields are set in {@code try/finally} per method — caller's context is not disturbed.
  *
- * <h3>MDC lifecycle</h3>
- * Each method puts the required fields into MDC, logs at the mandated level,
- * then removes those fields — even if the log call throws. The caller's MDC context
- * is not disturbed.
- *
- * <h3>Spec §1.12 event table</h3>
  * <pre>
  * Event                                  Level   MDC fields
  * Pool created                           INFO    transportTarget, clientId

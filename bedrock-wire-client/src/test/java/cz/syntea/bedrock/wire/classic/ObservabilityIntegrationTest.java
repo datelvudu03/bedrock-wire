@@ -52,17 +52,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       verifies it was invoked per request and headers were propagated</li>
  * </ol>
  *
- * <p>Runs ONLY with the {@code integration} profile:
- * <pre>
- *   mvn test "-Dspring.profiles.active=integration" -Dtest=ObservabilityIntegrationTest
- * </pre>
  */
 @SpringBootTest(classes = ObservabilityIntegrationTest.TestConfig.class)
 @ActiveProfiles("integration")
 @Slf4j
 class ObservabilityIntegrationTest {
-
-    // ── Test infrastructure ──────────────────────────────────────────────────
 
     /**
      * Captures all WireMetricsCollector.recordRequest() calls.
@@ -149,8 +143,6 @@ class ObservabilityIntegrationTest {
         appender.stop();
     }
 
-    // ── Capturing implementations ────────────────────────────────────────────
-
     @Test
     void allObservabilityLayersFire() {
         URI fullUrl = URI.create(aaaUrl);
@@ -187,7 +179,6 @@ class ObservabilityIntegrationTest {
 
         log.info("[ObservabilityTest] result{}", response);
 
-        // ── 1. LOGGING ───────────────────────────────────────────────────
 
         // Pool created — INFO with MDC fields transportTarget + clientId
         CapturedLog poolCreated = CAPTURED_LOGS.stream()
@@ -205,8 +196,6 @@ class ObservabilityIntegrationTest {
         log.info("[ObservabilityTest] LOGGING OK — Pool created: level={} mdc={}",
                 poolCreated.level, poolCreated.mdc);
 
-        // ── 2. METRICS ───────────────────────────────────────────────────
-
         // recordRequest should have been called exactly once with SUCCESS
         assertThat(RECORDED_METRICS)
                 .as("Expected exactly one recordRequest() call")
@@ -223,14 +212,13 @@ class ObservabilityIntegrationTest {
                 metric.clientId, metric.method, metric.statusCode,
                 metric.outcome, metric.duration);
 
-        // ── 3. TRACING ───────────────────────────────────────────────────
 
         // headersForRequest should have been called exactly once
         assertThat(TRACED_REQUESTS)
                 .as("Expected exactly one headersForRequest() call")
                 .hasSize(1);
 
-        HttpRequest tracedRequest = TRACED_REQUESTS.get(0);
+        HttpRequest tracedRequest = TRACED_REQUESTS.getFirst();
         assertThat(tracedRequest.getMethod()).isEqualTo(HttpMethod.POST);
         assertThat(tracedRequest.getUrl().toString()).hasToString(path.toString());
 
@@ -274,7 +262,6 @@ class ObservabilityIntegrationTest {
         }
     }
 
-    // ── Data holders ─────────────────────────────────────────────────────────
 
     /**
      * Injects a traceparent header and records that it was called.
@@ -309,7 +296,6 @@ class ObservabilityIntegrationTest {
                           Duration duration, RequestOutcome outcome) {
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     record RecordedPoolState(TransportTarget target, int activeConnections,
                              int pendingRequests) {

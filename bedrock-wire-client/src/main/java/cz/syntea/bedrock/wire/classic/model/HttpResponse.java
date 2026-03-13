@@ -10,6 +10,7 @@ import lombok.Value;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+
 /**
  * Result of a completed HTTP request returned by
  * {@link cz.syntea.bedrock.wire.classic.registry.HttpClient#execute(HttpRequest)}.
@@ -34,12 +35,20 @@ import java.util.Map;
 @Builder
 public class HttpResponse {
 
-    /** HTTP status code (e.g. 200, 404). Never zero. */
+    /**
+     * Shared mapper for {@link #toString()}. Handles {@link Duration} via JavaTimeModule.
+     */
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .enable(SerializationFeature.INDENT_OUTPUT);
+    /**
+     * HTTP status code (e.g. 200, 404). Never zero.
+     */
     int statusCode;
-
-    /** Response headers as returned by the server. Never {@code null}. */
+    /**
+     * Response headers as returned by the server. Never {@code null}.
+     */
     Map<String, List<String>> headers;
-
     /**
      * Response body decoded as UTF-8.
      * Empty string when there is no body; never {@code null}.
@@ -55,17 +64,11 @@ public class HttpResponse {
      * character boundary issues.
      */
     String responseBody;
-
     /**
      * Elapsed time from sending the request to receiving the last byte of the
      * response body (i.e. total round-trip time including body transfer).
      */
     Duration duration;
-
-    /** Shared mapper for {@link #toString()}. Handles {@link Duration} via JavaTimeModule. */
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .enable(SerializationFeature.INDENT_OUTPUT);
 
     /**
      * Pretty-printed JSON representation for logging.

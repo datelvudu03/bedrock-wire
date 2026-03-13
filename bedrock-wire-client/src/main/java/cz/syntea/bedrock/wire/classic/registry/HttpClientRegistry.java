@@ -6,36 +6,9 @@ import cz.syntea.bedrock.wire.classic.model.TlsConfig;
 /**
  * Manages {@link HttpClient} instances and their shared connection pools.
  *
- * <h3>Lifecycle</h3>
- * SHOULD be a singleton within the application. Creating multiple instances
- * may result in duplicate connection pools for the same
- * {@link cz.syntea.bedrock.wire.classic.model.TransportTarget}.
- *
- * <h3>Spring integration</h3>
- * Declare as a {@code @Bean} and annotate the {@code close()} method with
- * {@code @PreDestroy}. Failure to do so will result in connection pool resources
- * not being released on application shutdown.
- *
- * <pre>{@code
- * @Bean
- * public HttpClientRegistry httpClientRegistry() {
- *     return new HttpClientRegistryImpl();
- * }
- *
- * @PreDestroy
- * public void shutdownRegistry() {
- *     httpClientRegistry().close();
- * }
- * }</pre>
- *
- * <h3>Thread safety</h3>
- * Implementations MUST be thread-safe. {@code get()} MUST be safe for concurrent calls.
- *
- * <h3>Caching</h3>
- * {@code get()} caches {@link HttpClient} instances by {@code clientId}.
- * The same instance is returned for repeated calls with the same {@code clientId}.
- * Calling {@code get()} with the same {@code clientId} but different parameters
- * MUST throw an exception.
+ * <p>Should be a singleton. Thread-safe. {@code get()} caches by {@code clientId} —
+ * same ID with different config throws. Use {@code @PreDestroy} on {@code close()}
+ * or rely on the auto-configuration.
  */
 public interface HttpClientRegistry extends AutoCloseable {
 

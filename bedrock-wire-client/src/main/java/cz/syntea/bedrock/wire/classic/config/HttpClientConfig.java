@@ -1,6 +1,7 @@
 package cz.syntea.bedrock.wire.classic.config;
 
 import cz.syntea.bedrock.wire.classic.model.TlsConfig;
+import cz.syntea.bedrock.wire.classic.model.TransportTarget;
 import cz.syntea.bedrock.wire.classic.observability.NoOpTraceHeaderPropagator;
 import cz.syntea.bedrock.wire.classic.observability.TraceHeaderPropagator;
 import lombok.Builder;
@@ -13,41 +14,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Immutable configuration for a single {@link cz.syntea.bedrock.wire.classic.client.HttpClient}
- * instance. Identified by {@link #clientId} within an
- * {@link cz.syntea.bedrock.wire.classic.client.HttpClientRegistry}.
+ * Immutable per-client configuration, identified by {@link #clientId} within an
+ * {@link cz.syntea.bedrock.wire.classic.registry.HttpClientRegistry}.
  *
- * <h3>clientId</h3>
- * <ul>
- *   <li>MUST be unique within a single registry.</li>
- *   <li>SHOULD be a stable, human-readable identifier — not a generated UUID.</li>
- *   <li>SHOULD match the target service name to avoid misconfiguration.</li>
- * </ul>
- *
- * <h3>baseUrl</h3>
- * MUST contain only {@code scheme + host + port} — no path, no trailing slash.
- * The registry normalizes the URL to canonical form when computing the
- * {@link cz.syntea.bedrock.wire.classic.model.TransportTarget}.
- *
- * <h3>Connection pool sharing</h3>
- * Multiple {@code HttpClientConfig} instances with the same
- * {@code TransportTarget} (same host + port + {@code tlsConfigName}) share one
- * underlying TCP connection pool; they may differ in timeouts.
- *
- * <h3>Configuration changes</h3>
- * {@code HttpClientConfig} MUST be immutable. Changing configuration requires
- * a new {@code clientId} and a new registry instance.
- *
- * <h3>Timeout semantics</h3>
- * <ul>
- *   <li>{@code connectTimeout} — DNS resolution + TCP connect + TLS handshake</li>
- *   <li>{@code poolAcquisitionTimeout} — max wait for a free pool slot</li>
- *   <li>{@code responseTimeout} — time from sending the request to receiving the <em>first byte</em></li>
- *   <li>{@code readTimeout} — max time between consecutive bytes during body transfer</li>
- *   <li>{@code keepAliveTimeout} — max idle time before a pooled connection is evicted</li>
- * </ul>
- * {@code poolAcquisitionTimeout} and {@code responseTimeout} are independent and may
- * both fire on the same request.
+ * <p>{@code clientId} must be unique, stable, and human-readable (not a UUID).
+ * {@code baseUrl} is scheme + host + port only — no path, no trailing slash.
+ * Clients with the same {@link TransportTarget} share one connection pool.
+ * Immutable; changing config requires a new {@code clientId}.
  */
 @Value
 @Builder(toBuilder = true, buildMethodName = "buildInternal")
@@ -126,10 +99,9 @@ public class HttpClientConfig {
      * {@link cz.syntea.bedrock.wire.classic.exception.ResponseSizeExceededException}.
      * Default: 1 MB.
      *
-     * <p><strong>Important:</strong> the check runs <em>after</em> the full body has been
-     * buffered into a {@code String} in memory. Setting this value does not prevent heap
-     * allocation for bodies up to this size — it only prevents the oversized body from being
-     * returned to the caller. Keep this value well below the JVM heap limit.
+     * <p>The response body is streamed chunk-by-chunk; the byte count is checked
+     * as data arrives. If the limit is exceeded, the download is cancelled
+     * immediately — no oversized body is allocated on the heap.
      */
     @Builder.Default
     int maxResponseBodySize = 1024 * 1024;

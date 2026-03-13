@@ -6,19 +6,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * Reactive HTTP client bound to a single {@code baseUrl}.
- *
- * <p>Instances are obtained from and cached by
- * {@link HttpClientRegistry#get(cz.syntea.bedrock.wire.classic.config.HttpClientConfig)}.
- *
- * <h3>Concurrency</h3>
- * Implementations MUST be safe for concurrent use from multiple threads and reactive schedulers.
- *
- * <h3>Retries</h3>
- * {@code execute()} MUST NOT perform automatic retries. Retry logic is the caller's responsibility
- * to prevent silent duplication of non-idempotent requests (POST, PATCH).
- *
- * <h3>Blocking</h3>
- * {@code execute()} MUST NOT block the calling thread.
+ * Obtained from {@link HttpClientRegistry#get}. Thread-safe. No automatic retries.
  */
 public interface HttpClient {
 

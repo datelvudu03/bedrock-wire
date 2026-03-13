@@ -4,7 +4,6 @@ import cz.syntea.bedrock.wire.classic.config.HttpClientConfig;
 import cz.syntea.bedrock.wire.classic.config.HttpClientRegistryConfig;
 import cz.syntea.bedrock.wire.classic.exception.InsecureConfigurationException;
 import cz.syntea.bedrock.wire.classic.exception.RegistryCapacityException;
-import cz.syntea.bedrock.wire.classic.exception.TlsConfigurationException;
 import cz.syntea.bedrock.wire.classic.model.TlsConfig;
 import cz.syntea.bedrock.wire.classic.model.TransportTarget;
 import cz.syntea.bedrock.wire.classic.observability.NoOpWireMetricsCollector;
@@ -25,39 +24,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
+ * Production {@link HttpClientRegistry} implementation.
  *
- * Production implementation of {@link HttpClientRegistry}.
+ * <p>One {@link ConnectionProvider} per {@link TransportTarget}; clients sharing the
+ * same target share that pool. TLS is resolved lazily at first pool creation (fail-fast).
  *
- * <h3>Connection pool sharing</h3>
- * One {@link ConnectionProvider} (Reactor Netty pool) is created per
- * {@link TransportTarget} ({@code scheme + host + port + tlsConfigName}).
- * Multiple {@link HttpClient} instances with the same target share that pool
- * but may have independent timeout settings.
+ * <p>Thread safety via {@link ConcurrentHashMap#compute} — capacity and config-conflict
+ * checks are atomic with client creation.
  *
- * <h3>TLS</h3>
- * {@link TlsConfig} is resolved to a Netty {@link SslContext} lazily when the
- * first pool for a given {@link TransportTarget} is created. Any configuration
- * error is a fail-fast {@link TlsConfigurationException}.
- *
- * <h3>Thread safety</h3>
- * All mutable states are held in {@link ConcurrentHashMap}s.
- * {@link ConcurrentHashMap#computeIfAbsent} guarantees at-most-once creation
- * for the same key under concurrent calls.
- *
- * <h3>Logging</h3>
- * All log output goes through {@link WireLogger} which enforces the logger name
- * {@code bedrock.wire.client} and populates MDC fields per spec §1.12.
- * {@code @Slf4j} is intentionally NOT used in this class.
- *
- * <h3>Pool metrics</h3>
- * A {@link PoolMetricsReporter} background task polls pool state periodically
- * and forwards active-connection / pending-request counts to
- * {@link WireMetricsCollector#recordPoolState}. Pools are built with
- * {@code .metrics(true)} so Reactor Netty tracks the counters internally.
- *
- * <h3>Spring integration</h3>
- * Declare as a {@code @Bean}; annotate the Spring {@code @PreDestroy} shutdown
- * hook on {@link #close()} (or use the autoconfiguration provided by this library).
+ * <p>Logging via {@link WireLogger} ({@code bedrock.wire.client}). Pool metrics via
+ * {@link PoolMetricsReporter}. Use {@code @PreDestroy} or the auto-configuration for shutdown.
  */
 public class HttpClientRegistryImpl implements HttpClientRegistry {
 
@@ -325,3 +301,12 @@ public class HttpClientRegistryImpl implements HttpClientRegistry {
         }
     }
 }
+
+/*
+•.,¸,.•*`•.,¸¸,.•*¯ ╭━━━━╮
+•.,¸,.•*¯`•.,¸,.•*¯.|:::::::::: /\___/\
+•.,¸,.•*¯`•.,¸,.•* <|:::::::::(｡ ●ω●｡) ᵐᵉᵒʷ ᵐᵉᵒʷ ᵐᵉᵒʷ
+•.,¸,.•¯•.,¸,.•╰ * >し------し---Ｊ
+*/
+
+

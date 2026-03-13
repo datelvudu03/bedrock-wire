@@ -37,78 +37,32 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 /**
- * {@link HttpClient} implementation backed by Spring {@link WebClient} and Reactor Netty.
+ * {@link HttpClient} backed by Spring {@link WebClient} / Reactor Netty.
  *
- * <h2>Timeout implementation</h2>
+ * <p><b>Timeouts:</b> {@code responseTimeout} (first byte) via Reactor Netty;
+ * {@code readTimeout} (inter-byte idle) via Netty {@code ReadTimeoutHandler}.
  *
- * <h3>responseTimeout</h3>
- * Configured on the Reactor Netty {@code HttpClient} via {@code .responseTimeout(duration)}
- * (set in {@link HttpClientRegistryImpl#buildNettyClient}).
- * Covers the period from sending the request to receiving the <em>first byte</em> of the
- * HTTP response. Does NOT include DNS, TCP connect, or TLS handshake (those are covered by
- * {@code connectTimeout}). When it fires, Reactor Netty emits {@link TimeoutException};
- * this class maps that to {@link RequestTimeoutException}.
+ * <p><b>Headers:</b> merged lowest→highest: defaultHeaders → trace propagator → request.
+ * Same-key entries are replaced, not appended (RFC 7230 case-insensitive).
  *
- * <h3>readTimeout</h3>
- * Implemented via Netty's {@link io.netty.handler.timeout.ReadTimeoutHandler} injected into
- * the channel pipeline per-request via {@code doOnRequest} / {@code doAfterResponseSuccess}
- * (in {@link HttpClientRegistryImpl#buildNettyClient}).
- * This is a true per-byte timeout: fires when no data arrives for {@code readTimeout}
- * consecutive milliseconds during body transfer.
- * When it fires, Netty emits {@link io.netty.handler.timeout.ReadTimeoutException};
- * this class maps that to {@link ReadTimeoutException}.
+ * <p><b>Response body:</b> streamed via {@code bodyToFlux(DataBuffer.class)} with inline
+ * size limit — download is cancelled if {@code maxResponseBodySize} is exceeded. Raw bytes
+ * accumulated in {@link ByteArrayOutputStream}, decoded to UTF-8 once after last chunk.
+ * All {@link DataBuffer}s released on every path to prevent native memory leaks.
  *
- * <h2>Logging</h2>
- * All logging goes through {@link WireLogger}, which enforces the logger name
- * {@code io.bedrock.wire.client} and populates MDC fields per spec §1.12.
- * {@code @Slf4j} is intentionally NOT used in this class.
+ * <p><b>Duration:</b> {@code HttpResponse.duration} = send → last byte;
+ * metrics duration = subscribe (incl. pool wait) → complete.
  *
- * <h2>Header merge order (highest priority wins)</h2>
- * <ol>
- *   <li>{@code HttpClientConfig.defaultHeaders} — static defaults</li>
- *   <li>{@link cz.syntea.bedrock.wire.classic.observability.TraceHeaderPropagator} — per-request trace context</li>
- *   <li>{@code HttpRequest.headers} — caller-supplied; <em>replaces</em> (not appends)</li>
- * </ol>
- * Header names are compared case-insensitively (RFC 7230). Spring's {@link HttpHeaders} enforces this.
- *
- * <h2>Body handling</h2>
- * <ul>
- *   <li>{@code HEAD}: body silently discarded per spec.</li>
- *   <li>Null or empty body: {@link BodyInserters#empty()} — avoids spurious {@code Content-Length: 0}
- *       on GET/DELETE.</li>
- *   <li>Non-empty body: sent via {@code bodyValue(String)} as UTF-8 text.</li>
- * </ul>
- *
- * <h2>Response body size limit (streaming)</h2>
- * The response body is consumed via {@code bodyToFlux(DataBuffer.class)} and accumulated
- * chunk-by-chunk. Each chunk's byte count is tracked against
- * {@link HttpClientConfig#getMaxResponseBodySize()}. If the running total exceeds the limit,
- * the subscription is cancelled immediately — no further data is downloaded and no
- * oversized {@code String} is allocated on the heap. This protects against OOM for
- * unexpectedly large responses.
- *
- * <p>Raw bytes are accumulated in a {@link ByteArrayOutputStream} and decoded to a UTF-8
- * {@code String} only once after the last chunk. This avoids the multi-byte character
- * boundary problem that would occur if each chunk were decoded independently (e.g. a
- * two-byte {@code ř} split across two buffers).
- *
- * <p>Every {@link DataBuffer} is released via {@link DataBufferUtils#release} on all paths
- * (success, size exceeded, error, cancel) to prevent Netty native memory leaks.
- *
- * <h2>Duration semantics</h2>
- * <ul>
- *   <li>{@link HttpResponse#getDuration()} — from sending the request to last byte of body.</li>
- *   <li>Metrics {@code duration} — from {@code execute()} subscription (including pool wait) to completion.</li>
- * </ul>
+ * <p>All logging via {@link WireLogger} ({@code bedrock.wire.client}).
  */
 class HttpClientImpl implements HttpClient {
 
-    private final HttpClientConfig     config;
-    private final TransportTarget      transportTarget;  // needed for pool-exhausted log (spec §1.12)
-    private final WebClient            webClient;
+    private final HttpClientConfig config;
+    private final TransportTarget transportTarget;  // needed for pool-exhausted log (spec §1.12)
+    private final WebClient webClient;
     private final WireMetricsCollector metricsCollector;
-    private final BooleanSupplier      registryClosedChecker;
-    private final AtomicInteger        inFlightCounter;
+    private final BooleanSupplier registryClosedChecker;
+    private final AtomicInteger inFlightCounter;
 
     HttpClientImpl(
             HttpClientConfig config,
@@ -117,15 +71,34 @@ class HttpClientImpl implements HttpClient {
             WireMetricsCollector metricsCollector,
             BooleanSupplier registryClosedChecker,
             AtomicInteger inFlightCounter) {
-        this.config                = config;
-        this.transportTarget       = transportTarget;
-        this.webClient             = webClient;
-        this.metricsCollector      = metricsCollector;
+        this.config = config;
+        this.transportTarget = transportTarget;
+        this.webClient = webClient;
+        this.metricsCollector = metricsCollector;
         this.registryClosedChecker = registryClosedChecker;
-        this.inFlightCounter       = inFlightCounter;
+        this.inFlightCounter = inFlightCounter;
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
+    private static RequestOutcome outcomeFromError(Throwable e) {
+        if (e instanceof RequestTimeoutException) return RequestOutcome.TIMEOUT;
+        if (e instanceof ReadTimeoutException) return RequestOutcome.READ_TIMEOUT;
+        if (e instanceof PoolAcquisitionTimeoutException) return RequestOutcome.POOL_EXHAUSTED;
+        if (e instanceof ResponseSizeExceededException) return RequestOutcome.SIZE_EXCEEDED;
+        if (e instanceof RedirectNotSupportedException) return RequestOutcome.REDIRECT_REJECTED;
+        if (e instanceof RegistryClosedException) return RequestOutcome.REGISTRY_CLOSED;
+        return RequestOutcome.TRANSPORT_ERROR;
+    }
+
+    private static Duration elapsed(long startNanos) {
+        return Duration.ofNanos(System.nanoTime() - startNanos);
+    }
+
+    private static Map<String, List<String>> copyHeaders(HttpHeaders springHeaders) {
+        Map<String, List<String>> result = LinkedHashMap.newLinkedHashMap(springHeaders.size());
+        springHeaders.forEach((name, values) ->
+                result.put(name, List.copyOf(values)));
+        return Collections.unmodifiableMap(result);
+    }
 
     @Override
     public Mono<HttpResponse> execute(HttpRequest request) {
@@ -142,17 +115,7 @@ class HttpClientImpl implements HttpClient {
 
         // metricsStart and inFlightCounter are managed inside the reactive chain so that
         // they track actual subscription time, not call time.
-        //
-        // Bug fix: previously both were set synchronously in execute().  Since Mono is cold,
-        // a caller may build a chain (call execute()) and defer subscription — or never
-        // subscribe at all.  Setting them synchronously would:
-        //   • metricsStart: silently include assembly-time lag in every duration measurement,
-        //     making metrics inaccurate proportional to the delay between compose and subscribe.
-        //   • inFlightCounter: increment without a matching doFinally decrement when the Mono
-        //     is never subscribed, causing close() to log a false in-flight ERROR indefinitely.
-        //
-        // Fix: both are moved into doOnSubscribe, which fires exactly once per subscription,
-        // immediately before the operator chain starts executing — i.e. at the correct moment.
+
         final long[] metricsStart = {0L};
 
         // Mono.defer ensures the closed check runs at subscription time, not at
@@ -160,7 +123,7 @@ class HttpClientImpl implements HttpClient {
         // between the synchronous check above and actual subscription.
         return Mono.defer(() -> {
                     if (registryClosedChecker.getAsBoolean()) {
-                        return Mono.<HttpResponse>error(
+                        return Mono.error(
                                 new RegistryClosedException(config.getClientId()));
                     }
                     return buildWebClientCall(request, fullUri);
@@ -170,7 +133,7 @@ class HttpClientImpl implements HttpClient {
                 // ── metrics ───────────────────────────────────────────────────
                 .doOnSuccess(r -> recordMetrics(request.getMethod(), r.getStatusCode(),
                         elapsed(metricsStart[0]), RequestOutcome.SUCCESS))
-                .doOnError(e   -> recordMetrics(request.getMethod(), 0,
+                .doOnError(e -> recordMetrics(request.getMethod(), 0,
                         elapsed(metricsStart[0]), outcomeFromError(e)))
                 // ── subscription-time setup ───────────────────────────────────
                 // doOnSubscribe fires once per subscription, before any network activity.
@@ -186,8 +149,6 @@ class HttpClientImpl implements HttpClient {
                 // Placed after doOnSubscribe so the decrement always has a matching increment.
                 .doFinally(sig -> inFlightCounter.decrementAndGet());
     }
-
-    // ── Request validation ────────────────────────────────────────────────────
 
     private void validateRequest(HttpRequest request) {
         if (request == null) {
@@ -210,13 +171,9 @@ class HttpClientImpl implements HttpClient {
         }
     }
 
-    // ── URL construction ──────────────────────────────────────────────────────
-
     private URI buildFullUri(HttpRequest request) {
         return URI.create(config.getBaseUrl().toString() + request.getUrl().toString());
     }
-
-    // ── WebClient call ────────────────────────────────────────────────────────
 
     private Mono<HttpResponse> buildWebClientCall(HttpRequest request, URI fullUri) {
         org.springframework.http.HttpMethod springMethod =
@@ -262,7 +219,7 @@ class HttpClientImpl implements HttpClient {
                                     totalBytes[0] += chunkSize;
 
                                     if (totalBytes[0] > limit) {
-                                        // Release this chunk before signalling error
+                                        // Release this chunk before signaling error
                                         DataBufferUtils.release(dataBuffer);
                                         WireLogger.responseSizeExceeded(
                                                 config.getClientId(), fullUri,
@@ -278,7 +235,7 @@ class HttpClientImpl implements HttpClient {
                                     buffer.write(bytes, 0, chunkSize);
                                 })
                                 // Safety net: release any DataBuffer that wasn't consumed
-                                // by doOnNext (e.g. due to cancel or upstream error).
+                                // by doOnNext (e.g., due to cancel or upstream error).
                                 .doOnDiscard(DataBuffer.class, DataBufferUtils::release)
                                 .then(Mono.fromSupplier(() ->
                                         HttpResponse.builder()
@@ -320,7 +277,6 @@ class HttpClientImpl implements HttpClient {
         return bodySpec.body(BodyInserters.empty());
     }
 
-
     /**
      * Applies headers in priority order: defaultHeaders → trace → request (highest).
      * RFC 7230 case-insensitive semantics enforced by Spring's {@link HttpHeaders}.
@@ -351,8 +307,9 @@ class HttpClientImpl implements HttpClient {
         }
     }
 
-
-    /** Pass already-wrapped exceptions through; wrap everything else. */
+    /**
+     * Pass already-wrapped exceptions through; wrap everything else.
+     */
     private boolean shouldWrap(Throwable e) {
         return !(e instanceof BedrockWireException);
     }
@@ -425,25 +382,12 @@ class HttpClientImpl implements HttpClient {
             // Metrics failures MUST NOT affect request flow
         }
     }
-
-    private static RequestOutcome outcomeFromError(Throwable e) {
-        if (e instanceof RequestTimeoutException)         return RequestOutcome.TIMEOUT;
-        if (e instanceof ReadTimeoutException)            return RequestOutcome.READ_TIMEOUT;
-        if (e instanceof PoolAcquisitionTimeoutException) return RequestOutcome.POOL_EXHAUSTED;
-        if (e instanceof ResponseSizeExceededException)   return RequestOutcome.SIZE_EXCEEDED;
-        if (e instanceof RedirectNotSupportedException)   return RequestOutcome.REDIRECT_REJECTED;
-        if (e instanceof RegistryClosedException)         return RequestOutcome.REGISTRY_CLOSED;
-        return RequestOutcome.TRANSPORT_ERROR;
-    }
-
-    private static Duration elapsed(long startNanos) {
-        return Duration.ofNanos(System.nanoTime() - startNanos);
-    }
-
-    private static Map<String, List<String>> copyHeaders(HttpHeaders springHeaders) {
-        Map<String, List<String>> result = LinkedHashMap.newLinkedHashMap(springHeaders.size());
-        springHeaders.forEach((name, values) ->
-                result.put(name, List.copyOf(values)));
-        return Collections.unmodifiableMap(result);
-    }
 }
+
+
+/*
+•.,¸,.•*`•.,¸¸,.•*¯ ╭━━━━╮
+•.,¸,.•*¯`•.,¸,.•*¯.|:::::::::: /\___/\
+•.,¸,.•*¯`•.,¸,.•* <|:::::::::(｡ ●ω●｡) ᵐᵉᵒʷ ᵐᵉᵒʷ ᵐᵉᵒʷ
+•.,¸,.•¯•.,¸,.•╰ * >し------し---Ｊ
+*/

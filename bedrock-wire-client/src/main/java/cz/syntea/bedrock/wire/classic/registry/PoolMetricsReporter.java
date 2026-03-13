@@ -16,35 +16,15 @@ import java.util.concurrent.TimeUnit;
 
 
 /**
- * Periodically samples Reactor Netty connection-pool state and forwards it to
- * {@link WireMetricsCollector#recordPoolState}.
+ * Samples Reactor Netty pool state every {@link #DEFAULT_INTERVAL} seconds and
+ * forwards it to {@link WireMetricsCollector#recordPoolState}.
  *
- * <h3>How pool metrics are obtained</h3>
- * The actual Reactor Netty metrics API is a push callback, not a pull API.
- * {@link ConnectionProvider.Builder#metrics(boolean, java.util.function.Supplier)} accepts
- * a {@link ConnectionProvider.MeterRegistrar} whose
- * {@link ConnectionProvider.MeterRegistrar#registerMetrics registerMetrics} method is called
- * once per pool creation and receives a live {@link ConnectionPoolMetrics} handle.
+ * <p>{@link #createRegistrarFor(TransportTarget)} returns a {@link ConnectionProvider.MeterRegistrar}
+ * that captures the live {@link ConnectionPoolMetrics} handle at pool creation time.
+ * The registry passes it to {@code ConnectionProvider.Builder.metrics(true, supplier)}.
  *
- * <p>This class captures those handles at creation time via
- * {@link #createRegistrarFor(TransportTarget)}. The background scheduler then polls the
- * stored handles every {@link #DEFAULT_INTERVAL} seconds and forwards the snapshot to
- * {@link WireMetricsCollector#recordPoolState}.
- *
- * <h3>Integration with HttpClientRegistryImpl</h3>
- * For each new pool, the registry calls {@link #createRegistrarFor(TransportTarget)} and
- * passes the returned registrar to {@code ConnectionProvider.Builder.metrics(true, supplier)}.
- * No further coordination is needed — the metrics handle is captured automatically when
- * Reactor Netty initialises the pool.
- *
- * <h3>Lifecycle</h3>
- * {@link #start()} is called in the registry constructor.
- * {@link #stop()} is called in {@link cz.syntea.bedrock.wire.classic.client.HttpClientRegistry#close()}.
- * Both are idempotent.
- *
- * <h3>Thread safety</h3>
- * {@code poolMetrics} is a {@link ConcurrentHashMap}; the daemon executor thread only reads it.
- * The executor is a single-threaded daemon and does not prevent JVM shutdown.
+ * <p>{@link #start()} / {@link #stop()} are idempotent and thread-safe. The background
+ * executor is a single daemon thread that does not prevent JVM shutdown.
  */
 public final class PoolMetricsReporter {
 
@@ -80,8 +60,6 @@ public final class PoolMetricsReporter {
         this(metricsCollector, DEFAULT_INTERVAL);
     }
 
-    // ── MeterRegistrar factory ────────────────────────────────────────────────
-
     /**
      * Returns a {@link ConnectionProvider.MeterRegistrar} that captures the
      * {@link ConnectionPoolMetrics} handle for {@code target} when Reactor Netty
@@ -113,8 +91,6 @@ public final class PoolMetricsReporter {
         };
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
-
     /**
      * Starts the background sampling task. Idempotent and thread-safe.
      */
@@ -137,8 +113,6 @@ public final class PoolMetricsReporter {
         }
         executor.shutdown();
     }
-
-    // ── Sampling ──────────────────────────────────────────────────────────────
 
     private void sampleAll() {
         poolMetrics.forEach((target, metrics) -> {
