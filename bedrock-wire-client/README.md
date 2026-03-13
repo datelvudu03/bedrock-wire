@@ -222,7 +222,7 @@ Application property: `bedrock.wire.client.max-clients=100`
 
 ### Logging
 
-All log output uses a single logger name: `io.bedrock.wire.client`. No other logger is used in the library. Every log
+All log output uses a single logger name: `bedrock.wire.client`. No other logger is used in the library. Every log
 event populates MDC fields in `try/finally` to prevent leakage across reactive schedulers.
 
 | Event                              | Level | MDC fields                           |
@@ -242,7 +242,7 @@ Filter in your logging config:
 
 ```xml
 
-<logger name="io.bedrock.wire.client" level="INFO"/>
+<logger name="bedrock.wire.client" level="INFO"/>
 ```
 
 ### Metrics
