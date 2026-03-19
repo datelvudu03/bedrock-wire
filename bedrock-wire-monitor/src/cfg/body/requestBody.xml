@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<ns2:Envelope xmlns:ns2="http://schemas.xmlsoap.org/soap/envelope/"
+              xmlns:ws="http://www.supin.cz/soap/2023/04">
+    <ns2:Header>
+        <ws:Request IdentZpravy="PX1PS_oKgNHDOC" Mode="TST"/>
+    </ns2:Header>
+    <ns2:Body>
+        <ws:Ping/>
+    </ns2:Body>
+</ns2:Envelope>

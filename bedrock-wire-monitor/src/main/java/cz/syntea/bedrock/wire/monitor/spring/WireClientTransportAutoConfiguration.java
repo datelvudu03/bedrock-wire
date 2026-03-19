@@ -1,5 +1,6 @@
 package cz.syntea.bedrock.wire.monitor.spring;
 
+import cz.syntea.bedrock.wire.classic.config.BedrockWireClientAutoConfiguration;
 import cz.syntea.bedrock.wire.classic.registry.HttpClientRegistry;
 import cz.syntea.bedrock.wire.monitor.config.MonitorConfigProvider;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorTransport;
@@ -14,9 +15,10 @@ import org.springframework.context.annotation.Bean;
 /**
  * Auto-configuration for the default {@link WireClientTransport}.
  *
- * <p>Runs before {@link BedrockWireMonitorAutoConfiguration} so that
- * the {@link MonitorTransport} bean is visible to {@code @ConditionalOnBean}
- * checks in the main auto-configuration.
+ * <p>Ordering: runs <strong>after</strong> {@link BedrockWireClientAutoConfiguration}
+ * (so that {@link HttpClientRegistry} bean exists) and <strong>before</strong>
+ * {@link BedrockWireMonitorAutoConfiguration} (so that the {@link MonitorTransport}
+ * bean is visible to {@code @ConditionalOnBean} checks in the main auto-configuration).
  *
  * <p>Only activates when both conditions are met:
  * <ul>
@@ -26,7 +28,10 @@ import org.springframework.context.annotation.Bean;
  * </ul>
  */
 @Slf4j
-@AutoConfiguration(before = BedrockWireMonitorAutoConfiguration.class)
+@AutoConfiguration(
+        after = BedrockWireClientAutoConfiguration.class,
+        before = BedrockWireMonitorAutoConfiguration.class
+)
 @ConditionalOnProperty(name = "bedrock.wire.monitor.enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnBean(HttpClientRegistry.class)
 public class WireClientTransportAutoConfiguration {

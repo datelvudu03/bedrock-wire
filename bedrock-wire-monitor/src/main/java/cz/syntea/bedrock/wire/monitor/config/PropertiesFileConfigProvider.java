@@ -74,7 +74,36 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
      * @throws java.io.UncheckedIOException if the file cannot be read
      */
     public PropertiesFileConfigProvider(Path configFilePath, Set<String> validatorAliases) {
-        Properties props = loadProperties(configFilePath);
+        this(loadProperties(configFilePath), validatorAliases);
+    }
+
+    /**
+     * Creates a new provider from an already-loaded {@link Properties} instance.
+     *
+     * <p>This constructor is designed to accept any {@code Properties} subclass
+     * (e.g. {@code PropertiesCfg}) that has already been loaded and resolved.
+     * The {@code monitor.*} namespace is extracted from the given properties;
+     * all other keys are ignored.
+     *
+     * <p>When a {@code PropertiesCfg} instance is passed, variable substitution
+     * ({@code ${...}}, {@code ${env.*}}, etc.) is already performed by
+     * {@code PropertiesCfg.getProperty()}, so the monitor receives fully
+     * resolved values.
+     *
+     * @param props            properties containing the {@code monitor.*} namespace;
+     *                         must not be {@code null}
+     * @param validatorAliases set of known validator aliases for validation;
+     *                         must not be {@code null}
+     * @throws IllegalArgumentException if the configuration is invalid
+     */
+    public PropertiesFileConfigProvider(Properties props, Set<String> validatorAliases) {
+        if (props == null) {
+            throw new IllegalArgumentException("Properties must not be null");
+        }
+        if (validatorAliases == null) {
+            throw new IllegalArgumentException("Validator aliases must not be null");
+        }
+
         Map<String, String> monitorProps = extractMonitorProperties(props);
 
         Map<String, String> defaults = extractByPrefix(monitorProps, "default.");
@@ -159,7 +188,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         return shutdownTimeout;
     }
 
-    private Properties loadProperties(Path path) {
+    private static Properties loadProperties(Path path) {
         if (path == null) {
             throw new IllegalArgumentException("Config file path must not be null");
         }

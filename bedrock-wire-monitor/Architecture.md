@@ -305,7 +305,7 @@ The final `MonitorStatus` is determined by two factors: the transport outcome an
                     │    TransportStatus?      │
                     └────────────┬────────────┘
                                  │
-              ┌──────────────────┼──────────────────┐
+              ┌──────────────────┼────  ──────────────┐
               ▼                  ▼                   ▼
        RESPONSE_RECEIVED   POOL_EXHAUSTED    TIMEOUT/CONNECT/IO
               │                  │                   │

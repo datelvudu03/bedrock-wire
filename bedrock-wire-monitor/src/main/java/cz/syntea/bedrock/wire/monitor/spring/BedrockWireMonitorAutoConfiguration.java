@@ -15,10 +15,14 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 
 
 /**
@@ -70,30 +74,102 @@ public class BedrockWireMonitorAutoConfiguration {
     }
 
     /**
+     * Bean names of Spring-internal {@link Properties} instances that must be
+     * excluded when auto-detecting the application's configuration bean.
+     */
+    private static final Set<String> SPRING_INFRASTRUCTURE_PROPERTIES = Set.of(
+            "systemProperties", "systemEnvironment"
+    );
+
+    /**
      * Registers the default {@link MonitorConfigProvider} that reads the
-     * {@code monitor.*} namespace from the configured {@code .param} file.
+     * {@code monitor.*} namespace.
      *
-     * @param properties        the monitor properties
+     * <h3>Configuration source resolution (priority order)</h3>
+     * <ol>
+     *   <li>Auto-detection: the context is scanned for {@link Properties} beans.
+     *       Spring infrastructure beans ({@code systemProperties},
+     *       {@code systemEnvironment}) are excluded. If exactly one application
+     *       {@code Properties} bean remains (e.g. a {@code PropertiesCfg} loaded
+     *       from {@code --app.configFile}), it is used directly — no extra
+     *       annotation or property is needed on the application side.</li>
+     *   <li>Fallback: if no suitable bean is found (or multiple candidates exist),
+     *       the {@code bedrock.wire.monitor.config-file} property is used to locate
+     *       and parse a standalone {@code .properties} file.</li>
+     * </ol>
+     *
+     * @param properties        the monitor starter properties
      * @param validatorRegistry the validator registry (for alias validation)
+     * @param applicationContext the Spring application context
      * @return the config provider
      */
     @Bean
     @ConditionalOnMissingBean
     public MonitorConfigProvider monitorConfigProvider(
             BedrockWireMonitorProperties properties,
-            ValidatorRegistry validatorRegistry) {
+            ValidatorRegistry validatorRegistry,
+            ApplicationContext applicationContext) {
 
+        // 1. Auto-detect: find application Properties beans, skip Spring infrastructure
+        Properties detected = detectApplicationProperties(applicationContext);
+        if (detected != null) {
+            log.info("Auto-detected monitor configuration from Properties bean: {} (class: {})",
+                    getBeanName(applicationContext, detected), detected.getClass().getSimpleName());
+            return new PropertiesFileConfigProvider(detected, validatorRegistry.getAliases());
+        }
+
+        // 2. Fall back to bedrock.wire.monitor.config-file
         String configFile = properties.getConfigFile();
         if (configFile == null || configFile.isBlank()) {
             throw new IllegalStateException(
-                    "Property 'bedrock.wire.monitor.config-file' is required but not set. "
-                            + "Set it to the path of your .param/.properties file "
-                            + "(e.g. --app.configFile=src/cfg/myapp.param).");
+                    "No application Properties bean detected in the context and "
+                            + "'bedrock.wire.monitor.config-file' is not set. "
+                            + "Either register a Properties bean (e.g. PropertiesCfg) containing "
+                            + "the monitor.* namespace, or set bedrock.wire.monitor.config-file "
+                            + "to the path of your .param/.properties file.");
         }
 
         Path path = Path.of(configFile);
-        log.info("Loading monitor configuration from: {}", path.toAbsolutePath());
+        log.info("Loading monitor configuration from file: {}", path.toAbsolutePath());
         return new PropertiesFileConfigProvider(path, validatorRegistry.getAliases());
+    }
+
+    /**
+     * Scans the application context for {@link Properties} beans, filtering out
+     * Spring infrastructure beans. Returns the single application bean if exactly
+     * one is found, or {@code null} otherwise.
+     */
+    private Properties detectApplicationProperties(ApplicationContext context) {
+        Map<String, Properties> allBeans = context.getBeansOfType(Properties.class);
+
+        List<Map.Entry<String, Properties>> candidates = allBeans.entrySet().stream()
+                .filter(e -> !SPRING_INFRASTRUCTURE_PROPERTIES.contains(e.getKey()))
+                .toList();
+
+        if (candidates.size() == 1) {
+            return candidates.get(0).getValue();
+        }
+
+        if (candidates.size() > 1) {
+            List<String> names = candidates.stream().map(Map.Entry::getKey).toList();
+            log.warn("Multiple application Properties beans found: {}. "
+                    + "Cannot auto-detect; falling back to bedrock.wire.monitor.config-file. "
+                    + "To resolve, either keep only one Properties bean or set "
+                    + "bedrock.wire.monitor.config-file explicitly.", names);
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolves the bean name for a given instance (for logging purposes).
+     */
+    private String getBeanName(ApplicationContext context, Properties bean) {
+        return context.getBeansOfType(Properties.class).entrySet().stream()
+                .filter(e -> e.getValue() == bean)
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse("unknown");
     }
 
     /**
