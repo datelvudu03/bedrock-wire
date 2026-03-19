@@ -1,5 +1,6 @@
 package cz.syntea.bedrock.wire.classic.model;
 
+import cz.syntea.bedrock.wire.classic.json.JsonFormat;
 import lombok.Builder;
 import lombok.Singular;
 import lombok.Value;
@@ -58,4 +59,9 @@ public class HttpRequest {
      * Binary payloads are not supported.
      */
     String body;
+
+    @Override
+    public String toString() {
+        return JsonFormat.toJson(this);
+    }
 }
