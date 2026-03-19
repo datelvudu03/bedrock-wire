@@ -1,5 +1,6 @@
 package cz.syntea.bedrock.wire.monitor.model;
 
+import cz.syntea.bedrock.wire.monitor.json.JsonFormat;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorResult;
 import lombok.Builder;
 import lombok.Value;
@@ -78,4 +79,9 @@ public class MonitorExecutionResult {
      * Provides access to HTTP status, response body, headers, and transport duration.
      */
     MonitorResult transport;
+
+    @Override
+    public String toString() {
+        return JsonFormat.toJson(this);
+    }
 }

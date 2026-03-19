@@ -1,5 +1,6 @@
 package cz.syntea.bedrock.wire.monitor.model;
 
+import cz.syntea.bedrock.wire.monitor.json.JsonFormat;
 import lombok.Value;
 
 /**
@@ -47,5 +48,10 @@ public class ValidationResult {
      */
     public static ValidationResult fail(String message) {
         return new ValidationResult(ValidationVerdict.FAIL, message);
+    }
+
+    @Override
+    public String toString() {
+        return JsonFormat.toJson(this);
     }
 }

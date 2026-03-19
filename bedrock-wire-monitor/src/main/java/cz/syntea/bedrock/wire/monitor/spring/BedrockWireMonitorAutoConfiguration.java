@@ -17,6 +17,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -215,5 +217,49 @@ public class BedrockWireMonitorAutoConfiguration {
                 templateProcessor,
                 listenerList != null ? listenerList : List.of()
         );
+    }
+
+    // ── Startup diagnostics ─────────────────────────────────────────────────
+
+    /**
+     * Checks at startup whether critical beans are present and logs
+     * actionable diagnostics if they are missing.
+     *
+     * <p>Fires on {@link ContextRefreshedEvent}, after all beans are created
+     * and conditional evaluations are complete. This catches the silent failure
+     * where config loads successfully but the transport/engine chain is broken.
+     */
+    @EventListener(ContextRefreshedEvent.class)
+    public void onStartupDiagnostics(ContextRefreshedEvent event) {
+        ApplicationContext context = event.getApplicationContext();
+
+        boolean hasTransport = !context.getBeansOfType(MonitorTransport.class).isEmpty();
+        boolean hasEngine = !context.getBeansOfType(MonitorEngine.class).isEmpty();
+        boolean hasConfig = !context.getBeansOfType(MonitorConfigProvider.class).isEmpty();
+
+        if (hasConfig && !hasTransport) {
+            log.error("╔══════════════════════════════════════════════════════════════╗");
+            log.error("║  MONITOR CONFIGURATION LOADED BUT NO TRANSPORT AVAILABLE    ║");
+            log.error("╠══════════════════════════════════════════════════════════════╣");
+            log.error("║  Monitor checks will NOT run.                               ║");
+            log.error("║                                                              ║");
+            log.error("║  Cause: No MonitorTransport bean found in the context.       ║");
+            log.error("║  The default WireClientTransport requires:                   ║");
+            log.error("║    1. syntea-bedrock-wire-client on the classpath             ║");
+            log.error("║    2. HttpClientRegistry bean (auto-configured by            ║");
+            log.error("║       BedrockWireClientAutoConfiguration)                    ║");
+            log.error("║                                                              ║");
+            log.error("║  Fix: Add to your pom.xml:                                   ║");
+            log.error("║    <dependency>                                               ║");
+            log.error("║      <groupId>cz.syntea.bedrock</groupId>                    ║");
+            log.error("║      <artifactId>syntea-bedrock-wire-client</artifactId>      ║");
+            log.error("║    </dependency>                                              ║");
+            log.error("║                                                              ║");
+            log.error("║  Or provide a custom MonitorTransport bean.                  ║");
+            log.error("╚══════════════════════════════════════════════════════════════╝");
+        } else if (hasConfig && hasTransport && !hasEngine) {
+            log.error("MonitorTransport is available but MonitorEngine was not created. "
+                    + "Check for bean creation errors in the log above.");
+        }
     }
 }

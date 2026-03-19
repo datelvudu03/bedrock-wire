@@ -129,6 +129,109 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
         log.info("Monitor configuration loaded: {} services, {} checks, {} TLS profiles",
                 this.services.size(), this.checks.size(), this.tlsProfiles.size());
+        logConfigurationSummary();
+    }
+
+    /**
+     * Formats a {@link Duration} as a human-readable string (e.g. "30s", "500ms", "2m").
+     */
+    private static String formatDuration(Duration duration) {
+        if (duration == null) {
+            return "null";
+        }
+        long millis = duration.toMillis();
+        if (millis < 1000) {
+            return millis + "ms";
+        }
+        long seconds = duration.toSeconds();
+        if (seconds < 60) {
+            return seconds + "s";
+        }
+        return duration.toMinutes() + "m";
+    }
+
+    /**
+     * Logs a detailed, human-readable summary of the loaded configuration
+     * at INFO level. Designed to give operators immediate visibility into
+     * what the monitor will do at startup.
+     */
+    private void logConfigurationSummary() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n╔══════════════════════════════════════════════════════════════╗");
+        sb.append("\n║              MONITOR CONFIGURATION SUMMARY                  ║");
+        sb.append("\n╠══════════════════════════════════════════════════════════════╣");
+
+        // Services
+        sb.append("\n║  Services (").append(services.size()).append("):");
+        if (services.isEmpty()) {
+            sb.append("\n║    (none)");
+        } else {
+            for (ServiceConfig svc : services) {
+                sb.append("\n║    ").append(svc.getServiceName())
+                        .append(" → ").append(svc.getUrl());
+                if (!svc.getTransportProperties().isEmpty()) {
+                    sb.append(" [");
+                    svc.getTransportProperties().forEach((k, v) ->
+                            sb.append(k).append("=").append(v).append(", "));
+                    sb.setLength(sb.length() - 2); // remove trailing ", "
+                    sb.append("]");
+                }
+            }
+        }
+
+        // Checks
+        sb.append("\n║  Checks (").append(checks.size()).append("):");
+        if (checks.isEmpty()) {
+            sb.append("\n║    (none)");
+        } else {
+            for (CheckConfig chk : checks) {
+                sb.append("\n║    ").append(chk.getCheckName())
+                        .append(" → service=").append(chk.getServiceName())
+                        .append(", ").append(chk.getMethod())
+                        .append(" ").append(chk.getPath() != null ? chk.getPath() : "/");
+                if (chk.getQuery() != null) {
+                    sb.append("?").append(chk.getQuery());
+                }
+                sb.append(", interval=").append(formatDuration(chk.getInterval()));
+                if (chk.getRetryCount() > 0) {
+                    sb.append(", retry=").append(chk.getRetryCount())
+                            .append("×").append(formatDuration(chk.getRetryDelay()));
+                }
+                if (!chk.getValidators().isEmpty()) {
+                    sb.append(", validators=").append(chk.getValidators());
+                }
+                if (chk.getTemplateFile() != null) {
+                    sb.append(", template=").append(chk.getTemplateFile());
+                }
+            }
+        }
+
+        // TLS profiles
+        sb.append("\n║  TLS profiles (").append(tlsProfiles.size()).append("):");
+        if (tlsProfiles.isEmpty()) {
+            sb.append("\n║    (none)");
+        } else {
+            for (TlsProfileConfig tls : tlsProfiles) {
+                sb.append("\n║    ").append(tls.getProfileName());
+                if (tls.getClientCert() != null) {
+                    sb.append(" [mTLS: ").append(tls.getClientCertType())
+                            .append(" ").append(tls.getClientCert()).append("]");
+                }
+                if (tls.getTrustStore() != null) {
+                    sb.append(" [trustStore: ").append(tls.getTrustStoreType())
+                            .append(" ").append(tls.getTrustStore()).append("]");
+                }
+                if (!tls.isHostnameVerification()) {
+                    sb.append(" [hostnameVerification=DISABLED]");
+                }
+            }
+        }
+
+        // Shutdown
+        sb.append("\n║  Shutdown timeout: ").append(formatDuration(shutdownTimeout));
+        sb.append("\n╚══════════════════════════════════════════════════════════════╝");
+
+        log.info("{}", sb);
     }
 
     /**

@@ -1,5 +1,6 @@
 package cz.syntea.bedrock.wire.monitor.spi;
 
+import cz.syntea.bedrock.wire.monitor.json.JsonFormat;
 import cz.syntea.bedrock.wire.monitor.model.HttpMethod;
 import lombok.Builder;
 import lombok.Singular;
@@ -53,4 +54,9 @@ public class MonitorRequest {
      * For {@code GET} requests the transport SHOULD ignore this field.
      */
     String body;
+
+    @Override
+    public String toString() {
+        return JsonFormat.toJson(this);
+    }
 }

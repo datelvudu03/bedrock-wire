@@ -1,5 +1,6 @@
 package cz.syntea.bedrock.wire.monitor.spi;
 
+import cz.syntea.bedrock.wire.monitor.json.JsonFormat;
 import lombok.Builder;
 import lombok.Value;
 
@@ -64,4 +65,9 @@ public class MonitorResult {
      * Duration of the last HTTP attempt, measured by the transport implementation.
      */
     Duration transportDuration;
+
+    @Override
+    public String toString() {
+        return JsonFormat.toJson(this);
+    }
 }
