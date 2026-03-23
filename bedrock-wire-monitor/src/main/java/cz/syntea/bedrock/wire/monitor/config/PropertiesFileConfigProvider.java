@@ -133,24 +133,6 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     }
 
     /**
-     * Formats a {@link Duration} as a human-readable string (e.g. "30s", "500ms", "2m").
-     */
-    private static String formatDuration(Duration duration) {
-        if (duration == null) {
-            return "null";
-        }
-        long millis = duration.toMillis();
-        if (millis < 1000) {
-            return millis + "ms";
-        }
-        long seconds = duration.toSeconds();
-        if (seconds < 60) {
-            return seconds + "s";
-        }
-        return duration.toMinutes() + "m";
-    }
-
-    /**
      * Logs a detailed, human-readable summary of the loaded configuration
      * at INFO level. Designed to give operators immediate visibility into
      * what the monitor will do at startup.
@@ -235,6 +217,24 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     }
 
     /**
+     * Formats a {@link Duration} as a human-readable string (e.g. "30s", "500ms", "2m").
+     */
+    private static String formatDuration(Duration duration) {
+        if (duration == null) {
+            return "null";
+        }
+        long millis = duration.toMillis();
+        if (millis < 1000) {
+            return millis + "ms";
+        }
+        long seconds = duration.toSeconds();
+        if (seconds < 60) {
+            return seconds + "s";
+        }
+        return duration.toMinutes() + "m";
+    }
+
+    /**
      * Parses a duration string with a required time unit.
      *
      * <p>Supported formats: {@code 500ms}, {@code 5s}, {@code 2m}, {@code 1h}.
@@ -279,14 +279,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         return services;
     }
 
-    @Override
     public List<TlsProfileConfig> getTlsProfiles() {
         return tlsProfiles;
     }
 
     // ── Properties file loading ─────────────────────────────────────────────
 
-    @Override
     public Duration getShutdownTimeout() {
         return shutdownTimeout;
     }
@@ -457,6 +455,10 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
                 retryDelay = DEFAULT_RETRY_DELAY;
             }
 
+            boolean retryOnIoError = parseBooleanOrDefault(
+                    lookupString(raw.get("retry.ioError"), defaults.get("retry.ioError")),
+                    false);
+
             // Header merge: default → service → check
             Map<String, String> headers = mergeHeaders(
                     extractHeaders(defaults),
@@ -492,6 +494,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
                     .templateFile(raw.get("templateFile"))
                     .retryCount(retryCount)
                     .retryDelay(retryDelay)
+                    .retryOnIoError(retryOnIoError)
                     .interval(interval)
                     .headers(Map.copyOf(headers))
                     .validators(List.copyOf(validatorList))

@@ -56,7 +56,7 @@ class CheckRunnerTest {
                 .validationParams(Map.of("httpStatus", "200", "contains", "<status>OK</status>"))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(MonitorStatus.UP, result.getStatus());
         assertEquals(1, result.getAttempts());
@@ -73,7 +73,7 @@ class CheckRunnerTest {
                 .validationParams(Map.of("httpStatus", "200"))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(MonitorStatus.DOWN, result.getStatus());
         assertTrue(result.getMessage().contains("500"));
@@ -84,8 +84,7 @@ class CheckRunnerTest {
         transport.stub("testSvc", StubTransport.timeout());
 
         CheckConfig check = baseCheck().build();
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
-
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
         assertEquals(MonitorStatus.DOWN, result.getStatus());
         assertEquals("ResponseTimeout", result.getMessage());
     }
@@ -99,7 +98,7 @@ class CheckRunnerTest {
                 .build());
 
         CheckConfig check = baseCheck().build();
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(MonitorStatus.ERROR, result.getStatus());
     }
@@ -113,7 +112,7 @@ class CheckRunnerTest {
                 .retryDelay(Duration.ofMillis(10))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(3, result.getAttempts()); // 1 initial + 2 retries
         assertEquals(MonitorStatus.DOWN, result.getStatus());
@@ -129,7 +128,7 @@ class CheckRunnerTest {
                 .retryDelay(Duration.ofMillis(10))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(2, result.getAttempts());
         assertEquals(MonitorStatus.DOWN, result.getStatus());
@@ -148,7 +147,7 @@ class CheckRunnerTest {
                 .retryDelay(Duration.ofMillis(10))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(1, result.getAttempts()); // no retry
         assertEquals(MonitorStatus.ERROR, result.getStatus());
@@ -165,7 +164,7 @@ class CheckRunnerTest {
                 .validationParams(Map.of("httpStatus", "200"))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(1, result.getAttempts()); // no retry for received responses
         assertEquals(MonitorStatus.DOWN, result.getStatus());
@@ -185,7 +184,7 @@ class CheckRunnerTest {
                 .validationParams(Map.of("httpStatus", "200", "maxDuration", "5s"))
                 .build();
 
-        MonitorExecutionResult result = runner.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(MonitorStatus.WARN, result.getStatus());
     }
@@ -211,7 +210,7 @@ class CheckRunnerTest {
                 List.of(badListener, listenerResults::add));
 
         CheckConfig check = baseCheck().build();
-        MonitorExecutionResult result = runnerWithBadListener.execute(check, SERVICE);
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
 
         assertEquals(MonitorStatus.UP, result.getStatus());
         assertEquals(1, listenerResults.size()); // second listener still called

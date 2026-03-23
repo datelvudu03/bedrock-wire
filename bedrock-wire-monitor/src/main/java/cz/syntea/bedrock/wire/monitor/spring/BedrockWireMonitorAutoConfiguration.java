@@ -192,11 +192,17 @@ public class BedrockWireMonitorAutoConfiguration {
      * auto-start on context refresh and graceful stop on context close.
      * Also exposes programmatic {@code start()} / {@code stop()}.
      *
+     * <p>Shutdown timeout resolution: if the config provider is a
+     * {@link PropertiesFileConfigProvider}, its parsed {@code monitor.executor.shutdownTimeout}
+     * value is used. Otherwise, {@code bedrock.wire.monitor.shutdown-timeout} from
+     * Spring properties is used (default: 30s).
+     *
      * @param configProvider    the config provider
      * @param transport         the transport
      * @param validatorRegistry the validator registry
      * @param templateProcessor the template processor
      * @param listeners         all registered result listeners
+     * @param properties        the monitor starter properties (for shutdown timeout fallback)
      * @return the monitor engine
      */
     @Bean
@@ -207,7 +213,14 @@ public class BedrockWireMonitorAutoConfiguration {
             MonitorTransport transport,
             ValidatorRegistry validatorRegistry,
             TemplateProcessor templateProcessor,
-            ObjectProvider<List<MonitorResultListener>> listeners) {
+            ObjectProvider<List<MonitorResultListener>> listeners,
+            BedrockWireMonitorProperties properties) {
+
+        // Resolve shutdown timeout: .param file value > Spring property > default
+        java.time.Duration shutdownTimeout = properties.getShutdownTimeout();
+        if (configProvider instanceof PropertiesFileConfigProvider concreteProvider) {
+            shutdownTimeout = concreteProvider.getShutdownTimeout();
+        }
 
         List<MonitorResultListener> listenerList = listeners.getIfAvailable();
         return new MonitorEngine(
@@ -215,7 +228,8 @@ public class BedrockWireMonitorAutoConfiguration {
                 transport,
                 validatorRegistry,
                 templateProcessor,
-                listenerList != null ? listenerList : List.of()
+                listenerList != null ? listenerList : List.of(),
+                shutdownTimeout
         );
     }
 

@@ -75,8 +75,21 @@ public class CheckConfig {
     Duration retryDelay = Duration.ofSeconds(1);
 
     /**
+     * Whether to retry on {@code IO_ERROR} transport status.
+     * Default: {@code false} (spec §2.5.4: IO_ERROR SHOULD NOT retry by default;
+     * MAY be enabled via configuration).
+     */
+    @Builder.Default
+    boolean retryOnIoError = false;
+
+    /**
      * Scheduling interval for this check. Resolved via the three-level lookup:
      * check → service → default. Never {@code null} after resolution.
+     *
+     * @apiNote Implementation extension — not in the v3 spec's {@code CheckConfig}
+     *          model (§2.4.6). Added for scheduling convenience; the interval is
+     *          resolved from the three-level lookup at parse time rather than at
+     *          scheduling time.
      */
     Duration interval;
 

@@ -10,15 +10,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Central monitor orchestrator implementing {@link SmartLifecycle}.
@@ -30,13 +35,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * <h3>Lifecycle</h3>
  * <ul>
  *   <li>{@link #start()} — loads config, initializes transport, starts scheduler</li>
- *   <li>{@link #stop()} — stops scheduler, waits for in-flight runs, closes transport</li>
+ *   <li>{@link #stop()} — stops scheduler, waits for in-flight runs, interrupts
+ *       remaining virtual threads, closes transport with remaining timeout</li>
  * </ul>
  *
  * <h3>Scheduling</h3>
  * Uses a single-thread {@link ScheduledExecutorService} for timing triggers.
  * Each trigger dispatches the actual check run to a virtual thread via
- * {@link Thread#ofVirtual()}.
+ * {@link Thread#ofVirtual()}. All spawned virtual threads are tracked for
+ * graceful shutdown.
  *
  * <h3>Phase ordering</h3>
  * Runs at phase {@code Integer.MAX_VALUE - 100}: starts late (after wire-client
@@ -52,9 +59,10 @@ public class MonitorEngine implements SmartLifecycle {
     private final ValidatorRegistry validatorRegistry;
     private final TemplateProcessor templateProcessor;
     private final List<MonitorResultListener> listeners;
+    private final Duration shutdownTimeout;
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new HashMap<>();
-    private final Map<String, AtomicBoolean> runningFlags = new HashMap<>();
-    private final Map<String, AtomicLong> skipCounters = new HashMap<>();
+    private final Map<String, CheckRunState> checkRunStates = new HashMap<>();
+    private final Set<Thread> activeVirtualThreads = ConcurrentHashMap.newKeySet();
     private volatile boolean running = false;
     private ScheduledExecutorService scheduler;
 
@@ -66,20 +74,44 @@ public class MonitorEngine implements SmartLifecycle {
      * @param validatorRegistry the validator registry; never {@code null}
      * @param templateProcessor the template processor; never {@code null}
      * @param listeners         the result listeners; never {@code null}, may be empty
+     * @param shutdownTimeout   grace period for graceful shutdown; never {@code null}
      */
     public MonitorEngine(MonitorConfigProvider configProvider,
                          MonitorTransport transport,
                          ValidatorRegistry validatorRegistry,
                          TemplateProcessor templateProcessor,
-                         List<MonitorResultListener> listeners) {
+                         List<MonitorResultListener> listeners,
+                         Duration shutdownTimeout) {
         this.configProvider = configProvider;
         this.transport = transport;
         this.validatorRegistry = validatorRegistry;
         this.templateProcessor = templateProcessor;
         this.listeners = listeners != null ? listeners : List.of();
+        this.shutdownTimeout = shutdownTimeout != null ? shutdownTimeout : Duration.ofSeconds(30);
     }
 
     // ── SmartLifecycle ──────────────────────────────────────────────────────
+
+    private static long remainingMs(Instant start, Duration timeout) {
+        long elapsed = Duration.between(start, Instant.now()).toMillis();
+        return Math.max(timeout.toMillis() - elapsed, 0);
+    }
+
+    private static Duration remaining(Instant start, Duration timeout) {
+        return Duration.ofMillis(remainingMs(start, timeout));
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
+    }
+
+    @Override
+    public int getPhase() {
+        return LIFECYCLE_PHASE;
+    }
+
+    // ── Check dispatch ──────────────────────────────────────────────────────
 
     @Override
     public void start() {
@@ -125,14 +157,16 @@ public class MonitorEngine implements SmartLifecycle {
                 continue;
             }
 
-            AtomicBoolean runningFlag = new AtomicBoolean(false);
-            AtomicLong skipCounter = new AtomicLong(0);
-            runningFlags.put(check.getCheckName(), runningFlag);
-            skipCounters.put(check.getCheckName(), skipCounter);
+            CheckRunState state = new CheckRunState(
+                    new AtomicBoolean(false),
+                    new AtomicLong(0),
+                    new AtomicReference<>(null)
+            );
+            checkRunStates.put(check.getCheckName(), state);
 
             Duration interval = check.getInterval();
             ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(
-                    () -> dispatchCheckRun(check, service, checkRunner, runningFlag, skipCounter),
+                    () -> dispatchCheckRun(check, service, checkRunner, state),
                     0,
                     interval.toMillis(),
                     TimeUnit.MILLISECONDS
@@ -147,6 +181,8 @@ public class MonitorEngine implements SmartLifecycle {
         log.info("MonitorEngine started: {} checks scheduled", checks.size());
     }
 
+    // ── Shutdown helpers ────────────────────────────────────────────────────
+
     @Override
     public void stop() {
         if (!running) {
@@ -154,14 +190,15 @@ public class MonitorEngine implements SmartLifecycle {
         }
 
         log.info("Stopping MonitorEngine...");
-        Duration shutdownTimeout = configProvider.getShutdownTimeout();
+        Instant shutdownStart = Instant.now();
 
         // 1. Stop scheduler (no new triggers)
         if (scheduler != null) {
             scheduler.shutdown();
             try {
-                if (!scheduler.awaitTermination(shutdownTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                    log.warn("Scheduler did not terminate within {}; forcing shutdown", shutdownTimeout);
+                long remainingMs = remainingMs(shutdownStart, shutdownTimeout);
+                if (!scheduler.awaitTermination(remainingMs, TimeUnit.MILLISECONDS)) {
+                    log.warn("Scheduler did not terminate within {}ms; forcing shutdown", remainingMs);
                     scheduler.shutdownNow();
                 }
             } catch (InterruptedException e) {
@@ -170,63 +207,108 @@ public class MonitorEngine implements SmartLifecycle {
             }
         }
 
-        // 2. Close transport
+        // 2. Wait for in-flight virtual threads, then interrupt remaining
+        if (!activeVirtualThreads.isEmpty()) {
+            log.info("Waiting for {} in-flight check run(s) to complete...",
+                    activeVirtualThreads.size());
+
+            long remainingMs = remainingMs(shutdownStart, shutdownTimeout);
+            long perThreadMs = activeVirtualThreads.isEmpty()
+                    ? remainingMs
+                    : Math.max(remainingMs / activeVirtualThreads.size(), 100);
+
+            for (Thread vt : activeVirtualThreads) {
+                try {
+                    vt.join(perThreadMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+
+            // Interrupt any still alive after grace period
+            for (Thread vt : activeVirtualThreads) {
+                if (vt.isAlive()) {
+                    log.warn("Interrupting check thread '{}' after shutdown grace period", vt.getName());
+                    vt.interrupt();
+                }
+            }
+        }
+
+        // 3. Close transport with remaining timeout
+        Duration remainingTimeout = remaining(shutdownStart, shutdownTimeout);
         try {
-            transport.close(shutdownTimeout);
+            log.debug("Closing transport with remaining timeout: {}", remainingTimeout);
+            transport.close(remainingTimeout);
         } catch (Exception e) {
             log.error("Error closing transport: {}", e.getMessage(), e);
         }
 
         scheduledTasks.clear();
-        runningFlags.clear();
-        skipCounters.clear();
+        checkRunStates.clear();
+        activeVirtualThreads.clear();
         running = false;
 
         log.info("MonitorEngine stopped");
     }
 
-    @Override
-    public boolean isRunning() {
-        return running;
-    }
-
-    @Override
-    public int getPhase() {
-        return LIFECYCLE_PHASE;
-    }
-
-    // ── Check dispatch ──────────────────────────────────────────────────────
-
     private void dispatchCheckRun(CheckConfig check,
                                   ServiceConfig service,
                                   CheckRunner checkRunner,
-                                  AtomicBoolean runningFlag,
-                                  AtomicLong skipCounter) {
-        if (!runningFlag.compareAndSet(false, true)) {
-            long skips = skipCounter.incrementAndGet();
+                                  CheckRunState state) {
+        String requestId = UUID.randomUUID().toString();
+
+        if (!state.running().compareAndSet(false, true)) {
+            long skips = state.skipCount().incrementAndGet();
+            String inFlightRequestId = state.currentRequestId().get();
             if (skips == 1) {
-                log.warn("Check '{}' is still running; skipping scheduled trigger (first skip)",
-                        check.getCheckName());
+                log.warn("Check '{}' is still running (requestId={}); "
+                                + "skipping scheduled trigger at {} (first skip)",
+                        check.getCheckName(), inFlightRequestId, Instant.now());
             } else if (skips % 10 == 0) {
-                log.warn("Check '{}' has been skipped {} times (still running)",
-                        check.getCheckName(), skips);
+                log.warn("Check '{}' has been skipped {} times "
+                                + "(still running, requestId={})",
+                        check.getCheckName(), skips, inFlightRequestId);
             } else {
-                log.debug("Check '{}' skip #{}", check.getCheckName(), skips);
+                log.debug("Check '{}' skip #{} (requestId={})",
+                        check.getCheckName(), skips, inFlightRequestId);
             }
             return;
         }
 
+        state.currentRequestId().set(requestId);
+
         Thread.ofVirtual()
                 .name("check-" + check.getCheckName())
                 .start(() -> {
+                    Thread currentThread = Thread.currentThread();
+                    activeVirtualThreads.add(currentThread);
                     try {
-                        checkRunner.execute(check, service);
+                        checkRunner.execute(check, service, requestId);
                     } catch (Exception e) {
                         log.error("Unhandled exception in check '{}': {}",
                                 check.getCheckName(), e.getMessage(), e);
                     } finally {
-                        runningFlag.set(false);
+                        activeVirtualThreads.remove(currentThread);
+                        state.running().set(false);
                     }
                 });
+    }
+
+    // ── Internal types ──────────────────────────────────────────────────────
+
+    /**
+     * Mutable state for a single check's scheduling lifecycle.
+     *
+     * @param running          guard flag for skip-if-running
+     * @param skipCount        cumulative skip counter (for log aggregation)
+     * @param currentRequestId requestId of the currently in-flight check run
+     *                         (for skip-if-running diagnostics per spec §2.5.3)
+     */
+    private record CheckRunState(
+            AtomicBoolean running,
+            AtomicLong skipCount,
+            AtomicReference<String> currentRequestId
+    ) {
     }
 }

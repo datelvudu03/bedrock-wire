@@ -3,7 +3,6 @@ package cz.syntea.bedrock.wire.monitor.engine;
 import cz.syntea.bedrock.wire.monitor.config.CheckConfig;
 import cz.syntea.bedrock.wire.monitor.config.MonitorConfigProvider;
 import cz.syntea.bedrock.wire.monitor.config.ServiceConfig;
-import cz.syntea.bedrock.wire.monitor.config.TlsProfileConfig;
 import cz.syntea.bedrock.wire.monitor.listener.MonitorResultListener;
 import cz.syntea.bedrock.wire.monitor.model.HttpMethod;
 import cz.syntea.bedrock.wire.monitor.model.MonitorExecutionResult;
@@ -130,26 +129,12 @@ class MonitorEngineTest {
                 return List.of(svc);
             }
 
-            @Override
-            public List<TlsProfileConfig> getTlsProfiles() {
-                return List.of();
-            }
-
-            @Override
-            public Duration getShutdownTimeout() {
-                return Duration.ofSeconds(5);
-            }
         };
 
         MonitorResultListener listener = results::add;
 
-        return new MonitorEngine(
-                provider,
-                transport,
-                new ValidatorRegistry(),
-                new TemplateProcessor(),
-                List.of(listener)
-        );
+        return new MonitorEngine(provider, transport, new ValidatorRegistry(),
+                new TemplateProcessor(), List.of(listener), Duration.ofSeconds(5));
     }
 
     private CheckConfig checkConfig(String checkName, String serviceName, Duration interval) {

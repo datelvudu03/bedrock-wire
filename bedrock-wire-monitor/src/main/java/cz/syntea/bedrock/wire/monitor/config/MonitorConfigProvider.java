@@ -3,12 +3,16 @@ package cz.syntea.bedrock.wire.monitor.config;
 import java.util.List;
 
 /**
- * Provides monitor configuration (services, checks, and TLS profiles).
+ * Provides monitor configuration (services and checks).
  *
  * <p>The default implementation ({@code PropertiesFileConfigProvider}) reads
  * configuration from a {@code .properties} / {@code .param} file. Custom
  * implementations may load configuration from other sources (database,
  * remote config server, etc.).
+ *
+ * <p>This interface is transport-agnostic per spec §2.4.7. Transport-specific
+ * configuration (TLS profiles, shutdown timeout) is NOT part of this contract
+ * and is handled by the concrete implementation or Spring properties.
  *
  * <h3>Contract</h3>
  * <ul>
@@ -38,21 +42,4 @@ public interface MonitorConfigProvider {
      * @return immutable list of service configurations; never {@code null}
      */
     List<ServiceConfig> getServices();
-
-    /**
-     * Returns all configured TLS profiles.
-     *
-     * <p>TLS profiles are transport-specific. The monitor layer passes them
-     * to the transport implementation during initialization.
-     *
-     * @return immutable list of TLS profile configurations; never {@code null}
-     */
-    List<TlsProfileConfig> getTlsProfiles();
-
-    /**
-     * Returns the configured shutdown timeout for the monitor executor.
-     *
-     * @return shutdown timeout; never {@code null}
-     */
-    java.time.Duration getShutdownTimeout();
 }

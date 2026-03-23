@@ -77,8 +77,19 @@ public class MonitorExecutionResult {
     /**
      * Raw transport result from the last HTTP attempt.
      * Provides access to HTTP status, response body, headers, and transport duration.
+     * When {@link #isTransportInvoked()} is {@code false}, this contains a synthetic
+     * result (not from actual HTTP communication).
      */
     MonitorResult transport;
+
+    /**
+     * Whether the transport was actually invoked during this check run.
+     * {@code false} when the check run failed before reaching the transport
+     * (e.g. template processing error, configuration error). In that case,
+     * {@link #getTransport()} contains a synthetic result, not real HTTP data.
+     */
+    @Builder.Default
+    boolean transportInvoked = true;
 
     @Override
     public String toString() {

@@ -4,7 +4,10 @@ import cz.syntea.bedrock.wire.monitor.model.ValidationResult;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorResult;
 import lombok.extern.slf4j.Slf4j;
 import org.w3c.dom.Document;
+import org.xml.sax.ErrorHandler;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -37,6 +40,28 @@ import java.util.Map;
 public class XPathValidator implements Validator {
 
     private static final String ALIAS = "xpath";
+
+    /**
+     * Error handler that silently swallows parse errors. The validator catches
+     * the resulting {@link SAXException} and returns {@code FAIL} with the error
+     * message — the default handler's {@code [Fatal Error]} stderr output is
+     * suppressed.
+     */
+    private static final ErrorHandler SILENT_ERROR_HANDLER = new ErrorHandler() {
+        @Override
+        public void warning(SAXParseException e) throws SAXException {
+        }
+
+        @Override
+        public void error(SAXParseException e) throws SAXException {
+            throw e;
+        }
+
+        @Override
+        public void fatalError(SAXParseException e) throws SAXException {
+            throw e;
+        }
+    };
 
     private final DocumentBuilderFactory documentBuilderFactory;
 
@@ -86,6 +111,9 @@ public class XPathValidator implements Validator {
         Document document;
         try {
             DocumentBuilder builder = documentBuilderFactory.newDocumentBuilder();
+            // Suppress default ErrorHandler that prints [Fatal Error] to stderr;
+            // parse errors are caught and returned as ValidationResult.FAIL
+            builder.setErrorHandler(SILENT_ERROR_HANDLER);
             document = builder.parse(new InputSource(new StringReader(body)));
         } catch (Exception e) {
             return ValidationResult.fail("XML parse error: " + e.getMessage());
@@ -113,4 +141,3 @@ public class XPathValidator implements Validator {
         }
     }
 }
-
