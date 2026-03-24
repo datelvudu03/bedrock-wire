@@ -92,27 +92,6 @@ public class MonitorEngine implements SmartLifecycle {
 
     // ── SmartLifecycle ──────────────────────────────────────────────────────
 
-    private static long remainingMs(Instant start, Duration timeout) {
-        long elapsed = Duration.between(start, Instant.now()).toMillis();
-        return Math.max(timeout.toMillis() - elapsed, 0);
-    }
-
-    private static Duration remaining(Instant start, Duration timeout) {
-        return Duration.ofMillis(remainingMs(start, timeout));
-    }
-
-    @Override
-    public boolean isRunning() {
-        return running;
-    }
-
-    @Override
-    public int getPhase() {
-        return LIFECYCLE_PHASE;
-    }
-
-    // ── Check dispatch ──────────────────────────────────────────────────────
-
     @Override
     public void start() {
         if (running) {
@@ -181,8 +160,6 @@ public class MonitorEngine implements SmartLifecycle {
         log.info("MonitorEngine started: {} checks scheduled", checks.size());
     }
 
-    // ── Shutdown helpers ────────────────────────────────────────────────────
-
     @Override
     public void stop() {
         if (!running) {
@@ -250,6 +227,29 @@ public class MonitorEngine implements SmartLifecycle {
         running = false;
 
         log.info("MonitorEngine stopped");
+    }
+
+    private static long remainingMs(Instant start, Duration timeout) {
+        long elapsed = Duration.between(start, Instant.now()).toMillis();
+        return Math.max(timeout.toMillis() - elapsed, 0);
+    }
+
+    private static Duration remaining(Instant start, Duration timeout) {
+        return Duration.ofMillis(remainingMs(start, timeout));
+    }
+
+    // ── Check dispatch ──────────────────────────────────────────────────────
+
+    @Override
+    public boolean isRunning() {
+        return running;
+    }
+
+    // ── Shutdown helpers ────────────────────────────────────────────────────
+
+    @Override
+    public int getPhase() {
+        return LIFECYCLE_PHASE;
     }
 
     private void dispatchCheckRun(CheckConfig check,
