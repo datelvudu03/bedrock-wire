@@ -1,7 +1,7 @@
 package cz.syntea.bedrock.wire.monitor.spring;
 
-import cz.syntea.bedrock.wire.classic.config.BedrockWireClientAutoConfiguration;
 import cz.syntea.bedrock.wire.classic.registry.HttpClientRegistry;
+import cz.syntea.bedrock.wire.classic.spring.BedrockWireClientAutoConfiguration;
 import cz.syntea.bedrock.wire.monitor.config.MonitorConfigProvider;
 import cz.syntea.bedrock.wire.monitor.config.PropertiesFileConfigProvider;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorTransport;
