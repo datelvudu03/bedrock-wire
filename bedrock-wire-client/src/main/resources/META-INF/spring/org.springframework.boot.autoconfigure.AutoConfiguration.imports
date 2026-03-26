@@ -1,1 +1,1 @@
-cz.syntea.bedrock.wire.classic.config.BedrockWireClientAutoConfiguration
+cz.syntea.bedrock.wire.classic.spring.BedrockWireClientAutoConfiguration

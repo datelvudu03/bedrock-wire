@@ -57,7 +57,7 @@ public final class WireLogger {
      */
     private static final int BODY_TRUNCATE_LIMIT = 2048;
 
-    private WireLogger() {
+    WireLogger() {
     }
 
     // ── DEBUG/TRACE events (request/response wire log) ──────────────────────

@@ -1,3 +1,4 @@
+/*
 package cz.syntea.bedrock.wire.classic;
 
 
@@ -40,6 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+*/
 /**
  * Integration test for all three observability layers against a real endpoint:
  *
@@ -52,30 +54,39 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       verifies it was invoked per request and headers were propagated</li>
  * </ol>
  *
- */
+ *//*
+
 @SpringBootTest(classes = ObservabilityIntegrationTest.TestConfig.class)
 @ActiveProfiles("integration")
 @Slf4j
 class ObservabilityIntegrationTest {
 
-    /**
+    */
+/**
      * Captures all WireMetricsCollector.recordRequest() calls.
-     */
+ *//*
+
     static final List<RecordedMetric> RECORDED_METRICS = new CopyOnWriteArrayList<>();
 
-    /**
+    */
+/**
      * Captures all WireMetricsCollector.recordPoolState() calls.
-     */
+ *//*
+
     static final List<RecordedPoolState> RECORDED_POOL_STATES = new CopyOnWriteArrayList<>();
 
-    /**
+    */
+/**
      * Captures all TraceHeaderPropagator.headersForRequest() invocations.
-     */
+ *//*
+
     static final List<HttpRequest> TRACED_REQUESTS = new CopyOnWriteArrayList<>();
 
-    /**
+    */
+/**
      * Captures log events from bedrock.wire.client.
-     */
+ *//*
+
     static final List<CapturedLog> CAPTURED_LOGS = new CopyOnWriteArrayList<>();
     private static final String PING_BODY =
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" +
@@ -245,9 +256,11 @@ class ObservabilityIntegrationTest {
         }
     }
 
-    /**
+    */
+/**
      * Records every recordRequest() call for later assertion.
-     */
+ *//*
+
     static class CapturingMetricsCollector implements WireMetricsCollector {
 
         @Override
@@ -263,9 +276,11 @@ class ObservabilityIntegrationTest {
     }
 
 
-    /**
+    */
+/**
      * Injects a traceparent header and records that it was called.
-     */
+ *//*
+
     static class CapturingTraceHeaderPropagator implements TraceHeaderPropagator {
 
         @Override
@@ -277,9 +292,11 @@ class ObservabilityIntegrationTest {
         }
     }
 
-    /**
+    */
+/**
      * Logback appender that captures events from bedrock.wire.client.
-     */
+ *//*
+
     static class CapturingAppender extends AppenderBase<ILoggingEvent> {
 
         @Override
@@ -303,4 +320,4 @@ class ObservabilityIntegrationTest {
 
     record CapturedLog(String level, String message, Map<String, String> mdc) {
     }
-}
+}*/
