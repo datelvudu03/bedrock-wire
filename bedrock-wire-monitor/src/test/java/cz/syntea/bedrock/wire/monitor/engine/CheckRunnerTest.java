@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -223,5 +224,61 @@ class CheckRunnerTest {
                 .method(HttpMethod.GET)
                 .path("/ping")
                 .interval(Duration.ofSeconds(30));
+    }
+
+    @Test
+    void shouldNotRetryOnIoErrorByDefault() {
+        transport.stub("testSvc", MonitorResult.builder()
+                .transportStatus(TransportStatus.IO_ERROR)
+                .httpStatus(0)
+                .errorMessage("IOError")
+                .transportDuration(Duration.ofMillis(10))
+                .build());
+
+        CheckConfig check = baseCheck()
+                .retryCount(2)
+                .retryDelay(Duration.ofMillis(10))
+                .retryOnIoError(false)
+                .build();
+
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
+
+        assertEquals(1, result.getAttempts());
+        assertEquals(MonitorStatus.DOWN, result.getStatus());
+    }
+
+    @Test
+    void shouldRetryOnIoErrorWhenEnabled() {
+        transport.stub("testSvc", MonitorResult.builder()
+                .transportStatus(TransportStatus.IO_ERROR)
+                .httpStatus(0)
+                .errorMessage("IOError")
+                .transportDuration(Duration.ofMillis(10))
+                .build());
+
+        CheckConfig check = baseCheck()
+                .retryCount(2)
+                .retryDelay(Duration.ofMillis(10))
+                .retryOnIoError(true)
+                .build();
+
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
+
+        assertEquals(3, result.getAttempts()); // 1 initial + 2 retries
+        assertEquals(MonitorStatus.DOWN, result.getStatus());
+    }
+
+    @Test
+    void shouldReturnErrorOnTemplateFailure() {
+        CheckConfig check = baseCheck()
+                .templateFile("/nonexistent/template.xml")
+                .build();
+
+        MonitorExecutionResult result = runner.execute(check, SERVICE, "test-request-id");
+
+        assertEquals(MonitorStatus.ERROR, result.getStatus());
+        assertEquals(0, result.getAttempts());
+        assertFalse(result.isTransportInvoked());
+        assertTrue(result.getMessage().contains("Template file does not exist"));
     }
 }

@@ -13,9 +13,8 @@ import java.util.Map;
 /**
  * Property-bindable HTTP client configuration.
  *
- * <p>Maps 1:1 to {@link HttpClientConfig} fields. Bound from either Spring Environment
- * ({@code bedrock.wire.client.clients.<n>.*}) or parsed from {@code .param} file
- * ({@code wire.client.<n>.*}).
+ * <p>Maps 1:1 to {@link HttpClientConfig} fields. Parsed from {@code .param} file
+ * ({@code wire.client.<n>.*}) by {@link ParamFileClientConfigAdapter}.
  *
  * @since 1.1
  */

@@ -8,9 +8,8 @@ import java.nio.file.Path;
 /**
  * Property-bindable TLS profile configuration.
  *
- * <p>Maps 1:1 to {@link TlsConfig} fields. Bound from either Spring Environment
- * ({@code bedrock.wire.client.tls.<profile>.*}) or parsed from {@code .param} file
- * ({@code wire.tls.<profile>.*}).
+ * <p>Maps 1:1 to {@link TlsConfig} fields. Parsed from {@code .param} file
+ * ({@code wire.tls.<profile>.*}) by {@link ParamFileClientConfigAdapter}.
  *
  * @since 1.1
  */

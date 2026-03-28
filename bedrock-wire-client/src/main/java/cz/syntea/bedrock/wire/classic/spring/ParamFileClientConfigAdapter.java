@@ -15,8 +15,9 @@ import java.util.TreeSet;
  * from a {@link Properties} instance (typically {@code PropertiesCfg} loaded from a
  * {@code .param} file) into the property-bindable model used by wire-client auto-registration.
  *
- * <p>This adapter is a pure converter with no Spring dependency. It is used as a fallback
- * when no clients are defined in the Spring Environment but a {@code Properties} bean exists.
+ * <p>This adapter is a pure converter with no Spring dependency. It is used by
+ * {@link ParamFileClientRegistrar} to auto-register clients when the monitor
+ * is not present.
  *
  * <p><b>Note:</b> The {@link #parseDuration} method mirrors the format supported by
  * {@code bedrock-wire-monitor}'s {@code DurationParser}. Extracting to a shared utility

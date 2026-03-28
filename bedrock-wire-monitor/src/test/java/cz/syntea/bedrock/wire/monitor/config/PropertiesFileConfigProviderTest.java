@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Properties;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +41,25 @@ class PropertiesFileConfigProviderTest {
         assertEquals(3, provider.getChecks().size());
         assertEquals(1, provider.getTlsProfiles().size());
         assertEquals(Duration.ofSeconds(10), provider.getShutdownTimeout());
+    }
+
+    @Test
+    void shouldLoadFromPropertiesInstance() {
+        Properties props = new Properties();
+        props.setProperty("monitor.default.interval", "30s");
+        props.setProperty("monitor.service.svc.url", "https://a.example.com");
+        props.setProperty("monitor.check.c.service", "svc");
+        props.setProperty("monitor.check.c.interval", "5s");
+        props.setProperty("monitor.check.c.validation.validators", "httpStatus");
+        props.setProperty("monitor.check.c.validation.httpStatus", "200");
+
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(props, validAliases);
+
+        assertEquals(1, provider.getServices().size());
+        assertEquals("svc", provider.getServices().get(0).getServiceName());
+        assertEquals(1, provider.getChecks().size());
+        assertEquals("c", provider.getChecks().get(0).getCheckName());
+        assertEquals(Duration.ofSeconds(5), provider.getChecks().get(0).getInterval());
     }
 
     @Test

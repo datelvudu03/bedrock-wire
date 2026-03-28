@@ -10,14 +10,14 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * Fallback registrar that auto-registers HTTP clients from a {@code .param} file
- * when no clients are defined in the Spring Environment.
+ * Registrar that auto-registers HTTP clients from a {@code .param} file
+ * ({@code wire.client.*} and {@code wire.tls.*} namespaces).
  *
  * <p>This bean is activated only when:
  * <ol>
  *   <li>No {@code MonitorTransport} bean exists (monitor manages its own clients)</li>
- *   <li>No clients are defined in {@code bedrock.wire.client.clients.*} (Spring Environment)</li>
- *   <li>A {@code Properties} bean exists (typically {@code PropertiesCfg} from {@code .param} file)</li>
+ *   <li>A {@code Properties} bean exists (typically {@code PropertiesCfg} from
+ *       {@code --app.configFile})</li>
  * </ol>
  *
  * <p>TLS profile validation is strict: a client's {@code tlsProfile} must reference a

@@ -1,10 +1,10 @@
 package cz.syntea.bedrock.wire.monitor.validation;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry that maps validator aliases to {@link Validator} instances.
@@ -13,12 +13,11 @@ import java.util.Set;
  * {@code contains}, {@code regex}, {@code maxDuration}, {@code xpath}).
  * Additional custom validators can be registered via {@link #register(Validator)}.
  *
- * <p>Thread-safe after construction (the internal map is not modified after
- * all validators are registered during initialization).
+ * <p>Thread-safe — the internal map is a {@link ConcurrentHashMap}.
  */
 public class ValidatorRegistry {
 
-    private final Map<String, Validator> validators = new LinkedHashMap<>();
+    private final Map<String, Validator> validators = new ConcurrentHashMap<>();
 
     /**
      * Creates a registry pre-loaded with all built-in validators.

@@ -18,6 +18,7 @@ Deep technical reference for maintainers and contributors. For usage documentati
 10. [Lifecycle and shutdown](#lifecycle-and-shutdown)
 11. [Design decisions and rationale](#design-decisions-and-rationale)
 12. [Example wiring](#example-wiring)
+13. [Bean interaction across modules](#bean-interaction-across-modules)
 
 ---
 
@@ -707,34 +708,180 @@ java -jar myapp.jar --app.configFile=monitor.param
 
 The monitor auto-starts, schedules `apiHealth` every 30s, and calls `AlertingListener.onResult()` after each check.
 
+---
 
+## Bean interaction across modules
 
+### Deployment modes
 
+The `bedrock-wire-client` and `bedrock-wire-monitor` modules can be used independently or together.
+The auto-configuration adapts based on which modules are on the classpath and what beans are present.
 
+| Mode                           | Modules      | Client creation              | Client access                 |
+|--------------------------------|--------------|------------------------------|-------------------------------|
+| **Monitor + wire-client**      | both         | `WireClientTransport.init()` | `registry.get("serviceName")` |
+| **Wire-client standalone**     | client only  | `ParamFileClientRegistrar`   | `registry.get("clientId")`    |
+| **Monitor + custom transport** | monitor only | custom transport             | N/A                           |
 
+### Mode 1: Monitor + wire-client (primary)
 
+```
+┌─────────────────────────────────────────────────────────────┐
+│  BedrockWireClientAutoConfiguration                          │
+│                                                              │
+│  @Bean httpClientRegistry ←── always created                 │
+│  @Bean wireMetricsCollector                                  │
+│  @Bean traceHeaderPropagator                                 │
+│                                                              │
+│  ParamFileAutoRegistration ←── SKIPPED                       │
+│    @ConditionalOnMissingBean(MonitorTransport) = false       │
+│    (MonitorTransport bean exists → back-off)                 │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ HttpClientRegistry bean
+┌──────────────────────────┴──────────────────────────────────┐
+│  WireClientTransportAutoConfiguration                        │
+│  @AutoConfiguration(after = ClientAutoConfig,                │
+│                     before = MonitorAutoConfig)               │
+│                                                              │
+│  @Bean monitorTransport(registry, configProvider)            │
+│    → new WireClientTransport(registry)                       │
+│    → registerTlsProfiles() from .param file                  │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ MonitorTransport bean
+┌──────────────────────────┴──────────────────────────────────┐
+│  BedrockWireMonitorAutoConfiguration                         │
+│                                                              │
+│  @Bean validatorRegistry                                     │
+│  @Bean monitorConfigProvider ←── auto-detects PropertiesCfg  │
+│  @Bean templateProcessor                                     │
+│  @Bean monitorEngine(configProvider, transport, ...)         │
+│    → SmartLifecycle.start():                                 │
+│      1. transport.init(services) — creates HttpClients       │
+│      2. starts scheduler                                     │
+│    → SmartLifecycle.stop():                                  │
+│      1. stops scheduler                                      │
+│      2. waits for in-flight virtual threads                  │
+│      3. transport.close() — clears client cache              │
+└─────────────────────────────────────────────────────────────┘
+```
 
+Key points:
 
+- `HttpClientRegistry` is shared — clients created by the monitor are accessible to application code via
+  `registry.get("serviceName")`.
+- Clients are only available **after** `MonitorEngine.start()` completes, not during `@PostConstruct`.
+- The shared registry is NOT closed by `transport.close()` — its lifecycle is managed by the client auto-configuration.
 
+### Mode 2: Wire-client standalone (no monitor)
 
+```
+┌─────────────────────────────────────────────────────────────┐
+│  BedrockWireClientAutoConfiguration                          │
+│                                                              │
+│  @Bean httpClientRegistry                                    │
+│  @Bean wireMetricsCollector                                  │
+│  @Bean traceHeaderPropagator                                 │
+│                                                              │
+│  ParamFileAutoRegistration ←── ACTIVE                        │
+│    @ConditionalOnMissingBean(MonitorTransport) = true        │
+│    ParamFileRegistrationCondition: Properties bean exists?   │
+│                                                              │
+│    @Bean paramFileClientRegistrar(registry, props, tracer)   │
+│      → SmartInitializingSingleton.afterSingletonsInstantiated │
+│      → parses wire.tls.* → registers TLS in registry         │
+│      → parses wire.client.* → creates HttpClients            │
+└─────────────────────────────────────────────────────────────┘
+```
 
+Key points:
 
+- No named `@Qualifier` beans — all clients live in the registry.
+- Application code accesses clients via `registry.get("clientId")`.
+- `TraceHeaderPropagator` bean is injected into all auto-registered clients.
 
+### Auto-configuration ordering
 
+```
+1. BedrockWireClientAutoConfiguration
+   ├── Core beans: HttpClientRegistry, WireMetricsCollector, TraceHeaderPropagator
+   └── ParamFileAutoRegistration (conditional: no MonitorTransport)
 
+2. WireClientTransportAutoConfiguration
+   @AutoConfiguration(after = ClientAutoConfig, before = MonitorAutoConfig)
+   └── MonitorTransport bean (conditional: HttpClientRegistry exists)
 
+3. BedrockWireMonitorAutoConfiguration
+   ├── ValidatorRegistry, ConfigProvider, TemplateProcessor
+   └── MonitorEngine (conditional: MonitorTransport exists)
+```
 
+The `after/before` on `WireClientTransportAutoConfiguration` ensures: registry exists before transport is created,
+transport exists before `MonitorEngine` checks for it.
 
+### Back-off mechanism
 
+The wire-client's `.param` auto-registration is guarded by `ParamFileRegistrationCondition`,
+a custom `Condition` that checks two things via `BeanFactory`:
 
+1. No `MonitorTransport` bean exists (resolved by FQN string `cz.syntea.bedrock.wire.monitor.spi.MonitorTransport`
+   via `Class.forName()` to avoid a compile-time dependency; if the class is not on the classpath, this check is
+   skipped).
+2. An application `Properties` bean exists (excluding Spring internals).
 
+The condition runs on the `@Bean` method (not on the nested `@Configuration` class) because
+`@ConditionalOnMissingBean` on nested configuration classes can evaluate before user-config
+beans are visible. A `Condition` using `BeanFactory.getBeanNamesForType()` directly always
+sees all registered bean definitions regardless of processing order.
 
+### Shared PropertiesCfg
 
+Both modules consume the same `PropertiesCfg` bean (loaded from `--app.configFile`):
 
+```
+PropertiesCfg (.param file)
+├── monitor.*        → PropertiesFileConfigProvider (monitor module)
+├── wire.client.*    → ParamFileClientConfigAdapter (client module, standalone only)
+├── wire.tls.*       → ParamFileClientConfigAdapter (client module, standalone only)
+└── monitor.tls.*    → PropertiesFileConfigProvider (monitor module, passed to WireClientTransport)
+```
 
+In monitor mode, `wire.client.*` and `wire.tls.*` keys are ignored — the monitor's `monitor.service.*.transport.*` and
+`monitor.tls.*` namespaces control client configuration.
 
+### Bean lifecycle timeline
 
-
-
-
-
+```
+Context refresh
+│
+├── Phase: BeanDefinition registration
+│   └── (no ImportBeanDefinitionRegistrar — all beans are standard @Bean methods)
+│
+├── Phase: Bean creation
+│   ├── HttpClientRegistry ← created early (dependency of transport)
+│   ├── ValidatorRegistry
+│   ├── MonitorConfigProvider ← auto-detects PropertiesCfg
+│   ├── MonitorTransport (WireClientTransport) ← TLS profiles registered here
+│   ├── TemplateProcessor
+│   ├── MonitorEngine ← created but NOT started yet
+│   └── ParamFileClientRegistrar ← only in standalone mode
+│
+├── Phase: SmartInitializingSingleton
+│   └── ParamFileClientRegistrar.afterSingletonsInstantiated()
+│       → registers clients from wire.client.* (standalone mode only)
+│
+├── Phase: SmartLifecycle.start() (phase = MAX_VALUE - 100)
+│   └── MonitorEngine.start()
+│       ├── transport.init(services) → creates HttpClients in registry
+│       └── starts scheduler → dispatches check runs on virtual threads
+│
+├── ... application runs ...
+│
+├── Phase: SmartLifecycle.stop() (phase = MAX_VALUE - 100, stops early)
+│   └── MonitorEngine.stop()
+│       ├── stops scheduler
+│       ├── waits for in-flight check runs
+│       └── transport.close() → clears client cache (NOT registry)
+│
+└── Phase: Context close / @PreDestroy
+    └── HttpClientRegistry.close() → closes connection pools
+```

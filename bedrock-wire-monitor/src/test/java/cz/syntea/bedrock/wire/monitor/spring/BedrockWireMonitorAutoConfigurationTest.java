@@ -1,4 +1,3 @@
-/*
 package cz.syntea.bedrock.wire.monitor.spring;
 
 import cz.syntea.bedrock.wire.monitor.config.MonitorConfigProvider;
@@ -12,19 +11,16 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-*/
 /**
  * Tests for {@link BedrockWireMonitorAutoConfiguration}.
  *
  * <p>Uses {@link ApplicationContextRunner} for lightweight context testing
  * without starting a full Spring Boot application.
  *
- * <p>Note: {@link WireClientTransportAutoConfiguration} is NOT loaded here
- * because there is no {@code HttpClientRegistry} bean in the test context.
- * Only the main auto-config is tested; the transport auto-config is tested
- * separately in {@code WireClientTransportTest}.
- *//*
-
+ * <p>Note: {@link WireClientTransportAutoConfiguration} is loaded but will NOT
+ * activate because there is no {@code HttpClientRegistry} bean in the test context
+ * (class-level {@code @ConditionalOnBean(HttpClientRegistry.class)} fails).
+ */
 class BedrockWireMonitorAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -109,4 +105,4 @@ class BedrockWireMonitorAutoConfigurationTest {
                     assertThat(context).hasSingleBean(TemplateProcessor.class);
                 });
     }
-}*/
+}

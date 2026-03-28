@@ -287,8 +287,7 @@ public class WireClientTransport implements MonitorTransport {
         if (cause instanceof ConnectException) {
             return TransportStatus.CONNECT_ERROR;
         }
-        if (cause instanceof java.net.ConnectException
-                || (cause != null && cause.getClass().getSimpleName().contains("ConnectTimeout"))) {
+        if (cause != null && cause.getClass().getSimpleName().contains("ConnectTimeout")) {
             return TransportStatus.CONNECT_ERROR;
         }
         if (cause instanceof java.io.IOException) {
