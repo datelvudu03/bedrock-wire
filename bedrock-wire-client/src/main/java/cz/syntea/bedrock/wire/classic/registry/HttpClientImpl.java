@@ -130,6 +130,9 @@ class HttpClientImpl implements HttpClient {
                 })
                 // ── map all Netty / JDK exceptions → BedrockWireException ─────
                 .onErrorMap(this::shouldWrap, e -> wrapException(e, fullUri, elapsed(metricsStart[0])))
+                // ── wire log: transport error ─────────────────────────────────
+                .doOnError(e -> WireLogger.transportError(
+                        config.getClientId(), fullUri, elapsed(metricsStart[0]), e))
                 // ── metrics ───────────────────────────────────────────────────
                 .doOnSuccess(r -> recordMetrics(request.getMethod(), r.getStatusCode(),
                         elapsed(metricsStart[0]), RequestOutcome.SUCCESS))
@@ -188,6 +191,11 @@ class HttpClientImpl implements HttpClient {
         return Mono.defer(() -> {
             final long requestStart = System.nanoTime();
 
+            // ── wire log: outbound request ────────────────────────────────
+            WireLogger.requestSent(config.getClientId(),
+                    request.getMethod().name(), fullUri,
+                    request.getHeaders(), request.getBody());
+
             return buildRequestSpec(request, fullUri, springMethod)
                     .exchangeToMono(clientResponse -> {
                         int statusCode = clientResponse.statusCode().value();
@@ -237,15 +245,22 @@ class HttpClientImpl implements HttpClient {
                                 // Safety net: release any DataBuffer that wasn't consumed
                                 // by doOnNext (e.g., due to cancel or upstream error).
                                 .doOnDiscard(DataBuffer.class, DataBufferUtils::release)
-                                .then(Mono.fromSupplier(() ->
-                                        HttpResponse.builder()
-                                                .statusCode(statusCode)
-                                                .headers(headers)
-                                                .responseBody(buffer.size() > 0
-                                                        ? buffer.toString(StandardCharsets.UTF_8)
-                                                        : "")
-                                                .duration(elapsed(requestStart))
-                                                .build()));
+                                .then(Mono.fromSupplier(() -> {
+                                    String responseBody = buffer.size() > 0
+                                            ? buffer.toString(StandardCharsets.UTF_8)
+                                            : "";
+                                    Duration duration = elapsed(requestStart);
+                                    // ── wire log: inbound response ────────────
+                                    WireLogger.responseReceived(config.getClientId(),
+                                            fullUri, statusCode, duration,
+                                            headers, responseBody);
+                                    return HttpResponse.builder()
+                                            .statusCode(statusCode)
+                                            .headers(headers)
+                                            .responseBody(responseBody)
+                                            .duration(duration)
+                                            .build();
+                                }));
                     });
         });
     }

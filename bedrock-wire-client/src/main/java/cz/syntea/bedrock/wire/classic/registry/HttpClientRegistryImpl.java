@@ -18,6 +18,7 @@ import reactor.netty.tcp.SslProvider;
 
 import javax.net.ssl.SSLParameters;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -174,6 +175,61 @@ public class HttpClientRegistryImpl implements HttpClientRegistry {
         });
     }
 
+    // ── New: lookup by clientId (since 1.1) ───────────────────────────────────
+
+    /**
+     * Returns a previously registered {@link HttpClient} by its {@code clientId}.
+     *
+     * @param clientId the client identifier used during registration; must not be {@code null}
+     * @return the cached client; never {@code null}
+     * @throws IllegalArgumentException if no client with the given {@code clientId} is registered
+     * @throws IllegalStateException    if the registry has been closed
+     * @since 1.1
+     */
+    @Override
+    public HttpClient get(String clientId) {
+        Objects.requireNonNull(clientId, "clientId must not be null");
+        assertNotClosed("get(clientId)");
+
+        HttpClient client = clients.get(clientId);
+        if (client == null) {
+            throw new IllegalArgumentException(
+                    "No HttpClient registered with clientId '" + clientId
+                            + "'. Registered clients: " + clients.keySet());
+        }
+        return client;
+    }
+
+    // ── New: existence check (since 1.1) ──────────────────────────────────────
+
+    /**
+     * Checks whether a client with the given {@code clientId} is registered.
+     *
+     * @param clientId the client identifier to check; must not be {@code null}
+     * @return {@code true} if a client with the given ID exists in the registry
+     * @since 1.1
+     */
+    @Override
+    public boolean containsClient(String clientId) {
+        Objects.requireNonNull(clientId, "clientId must not be null");
+        return clients.containsKey(clientId);
+    }
+
+    // ── New: list all registered IDs (since 1.1) ──────────────────────────────
+
+    /**
+     * Returns a snapshot of all registered client IDs.
+     *
+     * @return an unmodifiable set of client IDs; never {@code null}, may be empty
+     * @since 1.1
+     */
+    @Override
+    public Set<String> getRegisteredClientIds() {
+        return Set.copyOf(clients.keySet());
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
@@ -301,12 +357,3 @@ public class HttpClientRegistryImpl implements HttpClientRegistry {
         }
     }
 }
-
-/*
-•.,¸,.•*`•.,¸¸,.•*¯ ╭━━━━╮
-•.,¸,.•*¯`•.,¸,.•*¯.|:::::::::: /\___/\
-•.,¸,.•*¯`•.,¸,.•* <|:::::::::(｡ ●ω●｡) ᵐᵉᵒʷ ᵐᵉᵒʷ ᵐᵉᵒʷ
-•.,¸,.•¯•.,¸,.•╰ * >し------し---Ｊ
-*/
-
-

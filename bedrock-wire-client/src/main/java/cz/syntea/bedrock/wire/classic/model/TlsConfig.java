@@ -1,6 +1,8 @@
 package cz.syntea.bedrock.wire.classic.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import cz.syntea.bedrock.wire.classic.config.HttpClientConfig;
+import cz.syntea.bedrock.wire.classic.json.JsonFormat;
 import lombok.Builder;
 import lombok.Singular;
 import lombok.Value;
@@ -51,6 +53,7 @@ public class TlsConfig {
      * Ignored if {@code clientCert} is {@code null}.
      * If the keystore is password-protected and this is absent, initialization fails fast.
      */
+    @JsonIgnore
     String clientCertPassword;
 
     /**
@@ -76,6 +79,7 @@ public class TlsConfig {
     /**
      * Trust store password. Ignored if {@code trustStore} is {@code null}.
      */
+    @JsonIgnore
     String trustStorePassword;
 
     /**
@@ -114,4 +118,9 @@ public class TlsConfig {
      */
     @Singular("enabledCipherSuite")
     List<String> enabledCipherSuites;
+
+    @Override
+    public String toString() {
+        return JsonFormat.toJson(this);
+    }
 }

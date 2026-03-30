@@ -1,16 +1,12 @@
 package cz.syntea.bedrock.wire.classic.model;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import cz.syntea.bedrock.wire.classic.json.JsonFormat;
 import lombok.Builder;
 import lombok.Value;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-
 /**
  * Result of a completed HTTP request returned by
  * {@link cz.syntea.bedrock.wire.classic.registry.HttpClient#execute(HttpRequest)}.
@@ -36,19 +32,15 @@ import java.util.Map;
 public class HttpResponse {
 
     /**
-     * Shared mapper for {@link #toString()}. Handles {@link Duration} via JavaTimeModule.
-     */
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .enable(SerializationFeature.INDENT_OUTPUT);
-    /**
      * HTTP status code (e.g. 200, 404). Never zero.
      */
     int statusCode;
+
     /**
      * Response headers as returned by the server. Never {@code null}.
      */
     Map<String, List<String>> headers;
+
     /**
      * Response body decoded as UTF-8.
      * Empty string when there is no body; never {@code null}.
@@ -64,6 +56,7 @@ public class HttpResponse {
      * character boundary issues.
      */
     String responseBody;
+
     /**
      * Elapsed time from sending the request to receiving the last byte of the
      * response body (i.e. total round-trip time including body transfer).
@@ -72,14 +65,10 @@ public class HttpResponse {
 
     /**
      * Pretty-printed JSON representation for logging.
-     * Falls back to Lombok's default toString if serialization fails.
+     * Falls back to class name + error if serialization fails.
      */
     @Override
     public String toString() {
-        try {
-            return MAPPER.writeValueAsString(this);
-        } catch (JsonProcessingException e) {
-            return super.toString();
-        }
+        return JsonFormat.toJson(this);
     }
 }

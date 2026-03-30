@@ -3,54 +3,80 @@ package cz.syntea.bedrock.wire.classic.registry;
 import cz.syntea.bedrock.wire.classic.config.HttpClientConfig;
 import cz.syntea.bedrock.wire.classic.model.TlsConfig;
 
+import java.util.Set;
+
+
 /**
- * Manages {@link HttpClient} instances and their shared connection pools.
+ * Registry for managing {@link HttpClient} instances and their connection pools.
  *
- * <p>Should be a singleton. Thread-safe. {@code get()} caches by {@code clientId} —
- * same ID with different config throws. Use {@code @PreDestroy} on {@code close()}
- * or rely on the auto-configuration.
+ * <p>Clients are created lazily via {@link #get(HttpClientConfig)} and cached by
+ * {@code clientId}. Once registered, a client can be retrieved by its ID alone
+ * via {@link #get(String)}.
+ *
+ * <p>Clients sharing the same {@code TransportTarget} (scheme + host + port + tlsConfigName)
+ * share a connection pool.
+ *
+ * @since 1.0
  */
-public interface HttpClientRegistry extends AutoCloseable {
+public interface HttpClientRegistry {
 
     /**
-     * Registers a TLS configuration profile.
+     * Returns an {@link HttpClient} for the given configuration, creating one if necessary.
      *
-     * <p>MUST be called before any {@code get()} that references the given
-     * {@code tlsConfigName}. Registering the same {@code configName} twice
-     * MUST throw an exception.
+     * <p>If a client with the same {@code clientId} already exists, the cached instance
+     * is returned. Otherwise, a new client and its connection pool are created atomically.
      *
-     * @param config the TLS profile to register; must not be {@code null}
-     * @throws cz.syntea.bedrock.wire.classic.exception.InsecureConfigurationException if {@code hostnameVerification=false} without {@code allowInsecureInProduction=true}
-     * @throws IllegalStateException                                                   if the registry is already closed
-     */
-    void registerTlsConfig(TlsConfig config);
-
-    /**
-     * Returns a cached or newly created {@link HttpClient} for the given configuration.
-     *
-     * <p>Connection pools are created lazily and shared per
-     * {@link cz.syntea.bedrock.wire.classic.model.TransportTarget}.
-     *
-     * @param config client configuration; must not be {@code null}
-     * @return the {@link HttpClient} instance; never {@code null}
-     * @throws IllegalArgumentException                                           if {@code tlsConfigName} references an unregistered config,
-     *                                                                            or the same {@code clientId} was registered with different parameters
-     * @throws cz.syntea.bedrock.wire.classic.exception.RegistryCapacityException if {@code maxClients} is exceeded
-     * @throws IllegalStateException                                              if the registry is already closed
+     * @param config the client configuration; must not be {@code null}
+     * @return the cached or newly created client; never {@code null}
+     * @throws cz.syntea.bedrock.wire.classic.exception.RegistryCapacityException
+     *         if the registry has reached its maximum capacity
+     * @throws cz.syntea.bedrock.wire.classic.exception.RegistryClosedException
+     *         if the registry has been closed
      */
     HttpClient get(HttpClientConfig config);
 
     /**
-     * Hard-closes all connection pools and releases all resources immediately.
+     * Returns a previously registered {@link HttpClient} by its {@code clientId}.
      *
-     * <p>Any {@code Mono} subscription in-flight at the time of {@code close()} will
-     * immediately emit {@code Mono.error(RegistryClosedException)}.
-     *
-     * <p>After {@code close()}, every later call to {@code get()} MUST throw
-     * {@link IllegalStateException}. Idempotent — repeated calls are safe.
-     *
-     * <p>SHOULD only be called during application shutdown.
+     * @param clientId the client identifier used during registration; must not be {@code null}
+     * @return the cached client; never {@code null}
+     * @throws IllegalArgumentException if no client with the given {@code clientId} is registered
+     * @throws cz.syntea.bedrock.wire.classic.exception.RegistryClosedException
+     *         if the registry has been closed
+     * @since 1.1
      */
-    @Override
+    HttpClient get(String clientId);
+
+    /**
+     * Checks whether a client with the given {@code clientId} is registered.
+     *
+     * @param clientId the client identifier to check; must not be {@code null}
+     * @return {@code true} if a client with the given ID exists in the registry
+     * @since 1.1
+     */
+    boolean containsClient(String clientId);
+
+    /**
+     * Returns a snapshot of all registered client IDs.
+     *
+     * @return an unmodifiable set of client IDs; never {@code null}, may be empty
+     * @since 1.1
+     */
+    Set<String> getRegisteredClientIds();
+
+    /**
+     * Registers a TLS configuration profile for use by clients.
+     *
+     * @param tlsConfig the TLS configuration; must not be {@code null}
+     */
+    void registerTlsConfig(TlsConfig tlsConfig);
+
+    /**
+     * Closes the registry and releases all connection pools.
+     *
+     * <p>After this method returns, all subsequent calls to {@link #get(HttpClientConfig)}
+     * and {@link #get(String)} will throw {@code RegistryClosedException}.
+     */
     void close();
+
 }

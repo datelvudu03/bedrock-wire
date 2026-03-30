@@ -1,0 +1,6 @@
+<healthCheck>
+    <clientId>$(clientId)</clientId>
+    <region>$(region)</region>
+    <requestId>$(uuid)</requestId>
+    <timestamp>$(timestamp)</timestamp>
+</healthCheck>

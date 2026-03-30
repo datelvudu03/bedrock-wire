@@ -1,0 +1,2 @@
+cz.syntea.bedrock.wire.monitor.spring.WireClientTransportAutoConfiguration
+cz.syntea.bedrock.wire.monitor.spring.BedrockWireMonitorAutoConfiguration

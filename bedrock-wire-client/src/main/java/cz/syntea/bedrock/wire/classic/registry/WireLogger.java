@@ -6,6 +6,8 @@ import org.slf4j.MDC;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Single structured logger for all {@code bedrock-wire-client} output.
@@ -16,6 +18,11 @@ import java.time.Duration;
  *
  * <pre>
  * Event                                  Level   MDC fields
+ * Request sent                           DEBUG   clientId, url
+ *   + headers, body                      TRACE   clientId, url
+ * Response received                      DEBUG   clientId, url, duration
+ *   + headers, body                      TRACE   clientId, url, duration
+ * Transport error                        DEBUG   clientId, url, duration
  * Pool created                           INFO    transportTarget, clientId
  * Pool closed                            INFO    transportTarget
  * Request timeout (responseTimeout)      WARN    clientId, url, duration
@@ -44,7 +51,122 @@ public final class WireLogger {
      */
     private static final Logger LOG = LoggerFactory.getLogger("bedrock.wire.client");
 
-    private WireLogger() {
+    /**
+     * Maximum number of characters logged for request/response bodies at TRACE level.
+     * Bodies exceeding this limit are truncated with a {@code ...[truncated]} suffix.
+     */
+    private static final int BODY_TRUNCATE_LIMIT = 2048;
+
+    WireLogger() {
+    }
+
+    // ── DEBUG/TRACE events (request/response wire log) ──────────────────────
+
+    /**
+     * Outbound request sent — DEBUG: method + URL; TRACE: + headers + body.
+     * MDC: clientId, url.
+     *
+     * @param clientId the client identifier
+     * @param method   HTTP method
+     * @param fullUri  fully resolved URI (base URL + relative path)
+     * @param headers  merged headers (default → trace → request)
+     * @param body     request body; may be {@code null}
+     */
+    public static void requestSent(String clientId, String method, URI fullUri,
+                                   Map<String, List<String>> headers, String body) {
+        if (!LOG.isDebugEnabled()) {
+            return;
+        }
+        try {
+            MDC.put(MDC_CLIENT_ID, clientId);
+            MDC.put(MDC_URL, fullUri.toString());
+            LOG.debug("→ {} {}", method, fullUri);
+            if (LOG.isTraceEnabled()) {
+                LOG.trace("  request headers={}", headers);
+                if (body != null && !body.isEmpty()) {
+                    LOG.trace("  request body={}", truncate(body));
+                }
+            }
+        } finally {
+            MDC.remove(MDC_CLIENT_ID);
+            MDC.remove(MDC_URL);
+        }
+    }
+
+    /**
+     * Response received — DEBUG: status + URL + duration; TRACE: + headers + body.
+     * MDC: clientId, url, duration.
+     *
+     * @param clientId the client identifier
+     * @param fullUri  fully resolved URI
+     * @param status   HTTP status code
+     * @param duration time from request send to last byte received
+     * @param headers  response headers
+     * @param body     response body; may be {@code null} or empty
+     */
+    public static void responseReceived(String clientId, URI fullUri, int status,
+                                        Duration duration,
+                                        Map<String, List<String>> headers, String body) {
+        if (!LOG.isDebugEnabled()) {
+            return;
+        }
+        try {
+            MDC.put(MDC_CLIENT_ID, clientId);
+            MDC.put(MDC_URL, fullUri.toString());
+            MDC.put(MDC_DURATION, duration.toString());
+            LOG.debug("← {} {} ({}ms)", status, fullUri, duration.toMillis());
+            if (LOG.isTraceEnabled()) {
+                LOG.trace("  response headers={}", headers);
+                if (body != null && !body.isEmpty()) {
+                    LOG.trace("  response body={}", truncate(body));
+                }
+            }
+        } finally {
+            MDC.remove(MDC_CLIENT_ID);
+            MDC.remove(MDC_URL);
+            MDC.remove(MDC_DURATION);
+        }
+    }
+
+    /**
+     * Transport error (no response received) — DEBUG: error class + message.
+     * MDC: clientId, url, duration.
+     *
+     * @param clientId the client identifier
+     * @param fullUri  fully resolved URI
+     * @param duration time from request send to error
+     * @param error    the exception that occurred
+     */
+    public static void transportError(String clientId, URI fullUri,
+                                      Duration duration, Throwable error) {
+        if (!LOG.isDebugEnabled()) {
+            return;
+        }
+        try {
+            MDC.put(MDC_CLIENT_ID, clientId);
+            MDC.put(MDC_URL, fullUri.toString());
+            MDC.put(MDC_DURATION, duration.toString());
+            LOG.debug("✗ {} {} ({}ms) {}: {}",
+                    error.getClass().getSimpleName(), fullUri, duration.toMillis(),
+                    error.getClass().getSimpleName(), error.getMessage());
+        } finally {
+            MDC.remove(MDC_CLIENT_ID);
+            MDC.remove(MDC_URL);
+            MDC.remove(MDC_DURATION);
+        }
+    }
+
+    /**
+     * Truncates a string to {@link #BODY_TRUNCATE_LIMIT} characters.
+     */
+    private static String truncate(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.length() <= BODY_TRUNCATE_LIMIT) {
+            return value;
+        }
+        return value.substring(0, BODY_TRUNCATE_LIMIT) + "...[truncated, total " + value.length() + " chars]";
     }
 
     // ── INFO events ───────────────────────────────────────────────────────────
