@@ -77,115 +77,67 @@ model, or SPI.
 
 ### Full module dependency map
 
-```mermaid
-graph TD
-    subgraph spring["spring (auto-configuration)"]
-        BWCAC[BedrockWireClientAutoConfiguration]
-        BWCP[BedrockWireClientProperties]
-        PFCR[ParamFileClientRegistrar]
-        PFCA[ParamFileClientConfigAdapter]
-        CP[ClientProperties]
-        TPP[TlsProfileProperties]
-    end
+┌─────────────────────────────────────────────────────────────────────┐
+│ spring  (auto-configuration)                                         │
+│ │
+│ BedrockWireClientAutoConfiguration │
+│ BedrockWireClientProperties │
+│ ParamFileClientRegistrar ──uses──▶ ParamFileClientConfigAdapter│
+│ │ │
+│ ▼ │
+│ ClientProperties │
+│ TlsProfileProperties │
+└───────────────┬──────────────────────────────────┬──────────────────┘
+│ creates │ builds
+▼ ▼
+┌─────────────────────────────────────┐ ┌────────────────────────────┐
+│ registry  (core)                     │ │ config │
+│ │ │ │
+│ «interface» HttpClientRegistry │◀─┤ HttpClientConfig │
+│ ▲ │ │ HttpClientRegistryConfig │
+│ │ implements │ └──────────┬─────────────────┘
+│ HttpClientRegistryImpl │ │ derives
+│ │ creates │ ▼
+│ ▼ │ ┌────────────────────────────┐
+│ «interface» HttpClient │ │ model │
+│ ▲ │ │ │
+│ │ implements │ │ TransportTarget │
+│ HttpClientImpl ──delegates──▶ WebClient │ TlsConfig │
+│ │ │ │ HttpRequest / Response │
+│ │ logs via │ │ HttpMethod │
+│ ▼ │ │ RequestOutcome │
+│ WireLogger │ └────────────────────────────┘
+│ │
+│ TlsSslContextFactory ──uses──▶ AliasPinningKeyManager │
+│ PoolMetricsReporter │
+│ ConnectionProvider (Reactor Netty) │
+└───────────────┬──────────────────────┘
+│ reports to
+▼
+┌─────────────────────────────────────┐ ┌────────────────────────────┐
+│ observability  (SPI)                 │ │ exception │
+│ │ │ │
+│ «interface» WireMetricsCollector │ │ BedrockWireException │
+│ «interface» TraceHeaderPropagator │ │ ▲ │
+│ │ │ │ extends │
+│ NoOpWireMetricsCollector │ │ RequestTimeoutException │
+│ NoOpTraceHeaderPropagator │ │ ReadTimeoutException │
+└─────────────────────────────────────┘ │ TransportException │
+│ PoolAcquisitionTimeout… │
+│ ResponseSizeExceeded… │
+│ RedirectNotSupported… │
+│ TlsConfigurationException│
+│ RegistryCapacityException│
+│ RegistryClosedException │
+│ InsecureConfiguration… │
+└────────────────────────────┘
 
-    subgraph registry["registry (core)"]
-        HCR_IF[HttpClientRegistry<br/><i>interface</i>]
-        HCR[HttpClientRegistryImpl]
-        HC_IF[HttpClient<br/><i>interface</i>]
-        HCI[HttpClientImpl]
-        TSSF[TlsSslContextFactory]
-        APKM[AliasPinningKeyManager]
-        PMR[PoolMetricsReporter]
-        WL[WireLogger]
-    end
-
-    subgraph config["config"]
-        HCC[HttpClientConfig]
-        HCRC[HttpClientRegistryConfig]
-    end
-
-    subgraph model["model"]
-        TT[TransportTarget]
-        TC[TlsConfig]
-        HReq[HttpRequest]
-        HRes[HttpResponse]
-        HM[HttpMethod]
-        RO[RequestOutcome]
-    end
-
-    subgraph observability["observability (SPI)"]
-        WMC[WireMetricsCollector<br/><i>interface</i>]
-        THP[TraceHeaderPropagator<br/><i>interface</i>]
-        NWMC[NoOpWireMetricsCollector]
-        NTHP[NoOpTraceHeaderPropagator]
-    end
-
-    subgraph exception["exception"]
-        BWE[BedrockWireException]
-        RTE[RequestTimeoutException]
-        RDTE[ReadTimeoutException]
-        TE[TransportException]
-        PATE[PoolAcquisitionTimeoutException]
-        RSEE[ResponseSizeExceededException]
-        RNSE[RedirectNotSupportedException]
-        TCE[TlsConfigurationException]
-        RCE[RegistryCapacityException]
-        RCLE[RegistryClosedException]
-        ICE[InsecureConfigurationException]
-    end
-
-    subgraph external["external"]
-        WC[Spring WebClient]
-        RN[Reactor Netty]
-        CPOOL[ConnectionProvider<br/><i>Reactor Netty</i>]
-    end
-
-    %% Spring wiring
-    BWCAC -->|creates| HCR
-    BWCAC -->|creates| NWMC
-    BWCAC -->|creates| NTHP
-    BWCAC -->|conditionally creates| PFCR
-    PFCR -->|uses| PFCA
-    PFCR -->|registers clients via| HCR_IF
-    PFCA -->|produces| CP
-    PFCA -->|produces| TPP
-    CP -->|builds| HCC
-    TPP -->|builds| TC
-
-    %% Registry
-    HCR -.->|implements| HCR_IF
-    HCR -->|creates| HCI
-    HCR -->|manages| CPOOL
-    HCR -->|uses| TSSF
-    HCR -->|uses| PMR
-    HCI -.->|implements| HC_IF
-    HCI -->|delegates to| WC
-    HCI -->|logs via| WL
-
-    %% TLS
-    TSSF -->|uses| APKM
-    TSSF -->|reads| TC
-
-    %% Config
-    HCC -->|derives| TT
-    HCR -->|keyed by clientId from| HCC
-
-    %% Observability
-    HCI -->|reports to| WMC
-    PMR -->|reports to| WMC
-    HCC -->|contains| THP
-
-    %% Exceptions
-    HCI -->|emits| BWE
-    RTE -.->|extends| BWE
-    RDTE -.->|extends| BWE
-    TE -.->|extends| BWE
-    PATE -.->|extends| BWE
-    RSEE -.->|extends| BWE
-    RNSE -.->|extends| BWE
-    RCE -.->|extends| BWE
-    RCLE -.->|extends| BWE
-```
+Key relationships (not drawn above):
+HttpClientRegistryImpl ──keyed by clientId from──▶ HttpClientConfig
+HttpClientConfig ──contains──▶ TraceHeaderPropagator
+HttpClientImpl / PMR ──reports to──▶ WireMetricsCollector
+HttpClientImpl ──emits──▶ BedrockWireException
+TlsSslContextFactory ──reads──▶ TlsConfig
 
 ### Layered view (simplified)
 

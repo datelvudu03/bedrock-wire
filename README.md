@@ -1,14 +1,34 @@
 # bedrock-wire
 
-Modulární projekt pro HTTP komunikaci a monitorování HTTP endpointů.
-Obsahuje dvě knihovny: bedrock-wire-client (transportní vrstva) a bedrock-wire-monitor (monitorovací vrstva).
-Podrobná specifikace je v souboru [bedrock-wire-spec.md](bedrock-wire-spec.md).
+Modular project for HTTP communication and HTTP endpoint monitoring.
+Two Spring Boot 3.x libraries, usable independently or together.
 
-## bedrock-wire-client
-Reaktivní HTTP klient (Reactor/WebClient) se sdílenými connection pooly per transport target, správou TLS profilů včetně mTLS a centrálním HttpClientRegistry. 
-Použitelný samostatně jako stavební blok pro jakýkoliv HTTP transport.
+## Modules
 
-## bedrock-wire-monitor
-Konfigurovatelný HTTP monitor postavený na bedrock-wire-client. 
-Spouští HTTP checky v pravidelných intervalech, validuje odpovědi (HTTP status, obsah, regex, doba odezvy) a reportuje výsledky přes MonitorResultListener. 
-Konfigurace přes properties namespace monitor.*.
+### bedrock-wire-client
+
+Reactive HTTP client built on Reactor Netty / WebFlux. Provides shared
+connection pools per transport target, TLS profile management (including
+mTLS), and a central `HttpClientRegistry`. Usable standalone as a building
+block for any HTTP transport.
+
+See [`bedrock-wire-client/Architecture-client.md`](bedrock-wire-client/Architecture-client.md)
+and [`bedrock-wire-client/README.md`](bedrock-wire-client/README.md).
+
+### bedrock-wire-monitor
+
+Transport-agnostic HTTP monitoring engine. Runs periodic HTTP checks,
+validates responses (status, body, regex, XPath, duration), and reports
+results via `MonitorResultListener`. HTTP transport is pluggable via the
+`MonitorTransport` SPI; the default `WireClientTransport` is built on
+`bedrock-wire-client`.
+
+See [`bedrock-wire-monitor/Architecture-monitor.md`](bedrock-wire-monitor/Architecture-monitor.md),
+[`bedrock-wire-monitor/README.md`](bedrock-wire-monitor/README.md), and
+the SPI specification [`bedrock-wire-monitor-v3-spi.md`](bedrock-wire-monitor-v3-spi.md).
+
+## Requirements
+
+- Java 21+
+- Spring Boot 3.x
+- Configuration via `.param` files (`--app.configFile=<path>`)

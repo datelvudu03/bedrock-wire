@@ -1,6 +1,6 @@
 # bedrock-wire-client
 
-Reactive HTTP client library for Java 17+ with shared connection pools, TLS management, and pluggable observability.
+Reactive HTTP client library for Java 21+ with shared connection pools, TLS management, and pluggable observability.
 
 ## What it does
 
@@ -56,9 +56,9 @@ target share one pool. A `null` TLS config name means "use JVM-default TLS" and 
 ```xml
 
 <dependency>
-    <groupId>cz.syntea.bedrock</groupId>
-    <artifactId>bedrock-wire-client</artifactId>
-    <version>${bedrock.wire.version}</version>
+  <groupId>cz.syntea.bedrock</groupId>
+  <artifactId>syntea-bedrock-wire-client</artifactId>
+  <version>${bedrock.wire.version}</version>
 </dependency>
 ```
 
@@ -90,7 +90,84 @@ Spring Boot 3.x discovers the auto-configuration through:
 src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
 ```
 
-### 3. Configure clients
+### 3. Auto-registration from a `.param` file
+
+The library can register `HttpClient` instances and TLS profiles automatically
+from a standard Java properties file (the `.param` file), removing the need
+for hand-written `@Bean` methods.
+
+#### How it activates
+
+Auto-registration is enabled when **both** conditions are met:
+
+1. A `Properties` bean exists in the Spring context (e.g. a `PropertiesCfg`
+   loaded from `--app.configFile=<path>`). Spring's built-in `systemProperties`
+   and `systemEnvironment` beans are filtered out.
+2. No `MonitorTransport` bean exists in the context.
+
+When `bedrock-wire-monitor` is on the classpath and active, its
+`WireClientTransport.init()` creates and manages clients itself, so
+auto-registration backs off to prevent duplicates. The check is implemented
+as a custom Spring `Condition` (`ParamFileRegistrationCondition`) using
+`BeanFactory.getBeanNamesForType()` directly, which reliably sees user-config
+beans regardless of bean-creation order.
+
+#### `.param` file namespaces
+
+| Namespace            | Purpose                                      |
+|----------------------|----------------------------------------------|
+| `wire.client.<id>.*` | Client configuration (per `clientId`)        |
+| `wire.tls.<name>.*`  | TLS profile (referenced via `tlsConfigName`) |
+
+Example:
+
+```properties
+# TLS profile
+wire.tls.payments-tls.clientCert=/certs/client.p12
+wire.tls.payments-tls.clientCertPassword=secret
+wire.tls.payments-tls.clientCertType=PKCS12
+# Client
+wire.client.payments.baseUrl=https://payments.example.com:8443
+wire.client.payments.connectTimeout=3s
+wire.client.payments.responseTimeout=10s
+wire.client.payments.readTimeout=10s
+wire.client.payments.tlsConfigName=payments-tls
+wire.client.payments.defaultHeader.Content-Type=text/xml
+```
+
+#### Access pattern
+
+Auto-registered clients live in the `HttpClientRegistry` and are retrieved
+by `clientId` — **no named `@Qualifier` beans are created**:
+
+```java
+
+@Service
+@RequiredArgsConstructor
+public class PaymentsService {
+
+  private final HttpClientRegistry registry;
+
+  public Mono<HttpResponse> sendPayment(String xmlBody) {
+    return registry.get("payments").execute(HttpRequest.builder()
+            .method(HttpMethod.POST)
+            .url(URI.create("/api/v1/payments"))
+            .body(xmlBody)
+            .build());
+  }
+}
+```
+
+The registered `TraceHeaderPropagator` bean is injected into every
+auto-registered client at construction time.
+
+> **Note:** Spring Environment auto-registration (binding clients directly
+> from `@ConfigurationProperties` / `application.yml`) was deliberately
+> removed. The only configuration sources for client registration are the
+> `.param` file (auto-registration) or programmatic `registry.get(...)`
+> calls (see next section).
+
+### 4. Configure clients programmatically
 
 ```java
 
