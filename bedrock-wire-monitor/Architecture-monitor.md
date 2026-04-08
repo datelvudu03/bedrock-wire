@@ -71,110 +71,68 @@ The `transport` package depends on `spi` + `config` + the external `bedrock-wire
 
 ### Full module dependency map
 
-```mermaid
-graph TD
-    subgraph spring["spring (auto-configuration)"]
-        BWMAC[BedrockWireMonitorAutoConfiguration]
-        WCTAC[WireClientTransportAutoConfiguration]
-        BWMP[BedrockWireMonitorProperties]
-    end
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ spring  (auto-configuration)                                         │
+│                                                                      │
+│   BedrockWireMonitorAutoConfiguration                                │
+│   WireClientTransportAutoConfiguration                               │
+│   BedrockWireMonitorProperties                                       │
+└──┬──────────────────┬─────────────────┬──────────────────┬──────────┘
+   │ creates          │ creates         │ creates          │ creates
+   ▼                  ▼                 ▼                  ▼
+┌─────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐
+│ validation  │  │ config       │  │ engine       │  │ transport       │
+│             │  │              │  │              │  │ (default impl)  │
+│ Validator   │  │ «interface»  │  │ MonitorEngine│  │                 │
+│ Registry    │  │ MonitorConfig│  │ «SmartLife…» │  │ WireClient      │
+│             │  │ Provider     │  │     │        │  │ Transport       │
+│ «interface» │  │      ▲       │  │     │ owns   │  │     │           │
+│ Validator   │  │      │ impl  │  │     ▼        │  │     │ implements│
+│      ▲      │  │ Properties   │  │ CheckRunner  │  │     ▼           │
+│      │ impl │  │ FileConfig   │  │     │        │  │ ┌─────────────┐ │
+│ HttpStatus… │  │ Provider     │  │     │ uses   │  │ │ spi         │ │
+│ Contains…   │  │      │       │  │     ▼        │◀─┤ │             │ │
+│ Regex…      │  │      │ provides  TemplateProc  │  │ │ «interface» │ │
+│ MaxDuration…│  │      ▼       │  │              │  │ │ Monitor     │ │
+│ XPath…      │  │ CheckConfig  │  │              │  │ │ Transport   │ │
+└──────┬──────┘  │ ServiceConfig│  └──────┬───────┘  │ │      │      │ │
+       │         │ TlsProfile…  │         │          │ │      │ uses │ │
+       │ contains│              │         │          │ │      ▼      │ │
+       │         └──────────────┘         │          │ │ Monitor     │ │
+       │                                  │ notifies │ │ Request     │ │
+       └──── (used by CheckRunner) ───────┤          │ │ Monitor     │ │
+                                          ▼          │ │ Result      │ │
+                                  ┌──────────────┐   │ │ Transport   │ │
+                                  │ listener     │   │ │ Status      │ │
+                                  │              │   │ └─────────────┘ │
+                                  │ «interface»  │   └────────┬────────┘
+                                  │ MonitorResult│            │ uses
+                                  │ Listener     │            ▼
+                                  └──────────────┘   ┌──────────────────┐
+                                                     │ bedrock-wire-    │
+┌────────────────────────────┐                       │ client (external)│
+│ model  (value objects)     │                       │                  │
+│                            │                       │ HttpClient       │
+│   HttpMethod               │                       │ Registry         │
+│   MonitorStatus            │                       │ HttpClient       │
+│   ValidationVerdict        │                       └──────────────────┘
+│   ValidationResult         │
+│   MonitorExecutionResult ──── produced by CheckRunner
+└────────────────────────────┘
 
-    subgraph engine["engine (core)"]
-        ME[MonitorEngine<br/><i>SmartLifecycle</i>]
-        CR[CheckRunner]
-        TP[TemplateProcessor]
-    end
-
-    subgraph config["config (model + provider)"]
-        MCP[MonitorConfigProvider]
-        PFCP[PropertiesFileConfigProvider]
-        CC[CheckConfig]
-        SC[ServiceConfig]
-        TPC[TlsProfileConfig]
-    end
-
-    subgraph validation["validation"]
-        VR[ValidatorRegistry]
-        V[Validator<br/><i>interface</i>]
-        HSV[HttpStatusValidator]
-        CV[ContainsValidator]
-        RV[RegexValidator]
-        MDV[MaxDurationValidator]
-        XPV[XPathValidator]
-    end
-
-    subgraph spi["spi (transport boundary)"]
-        MT[MonitorTransport<br/><i>interface</i>]
-        MReq[MonitorRequest]
-        MRes[MonitorResult]
-        TS[TransportStatus]
-    end
-
-    subgraph transport["transport (default impl)"]
-        WCT[WireClientTransport]
-    end
-
-    subgraph listener["listener"]
-        MRL[MonitorResultListener<br/><i>interface</i>]
-    end
-
-    subgraph model["model (value objects)"]
-        HM[HttpMethod]
-        MS[MonitorStatus]
-        VV[ValidationVerdict]
-        VRes[ValidationResult]
-        MER[MonitorExecutionResult]
-    end
-
-    subgraph external["bedrock-wire-client (external)"]
-        HCR[HttpClientRegistry]
-        HC[HttpClient]
-    end
-
-    %% Spring wiring
-    BWMAC -->|creates| VR
-    BWMAC -->|creates| PFCP
-    BWMAC -->|creates| TP
-    BWMAC -->|creates| ME
-    WCTAC -->|creates| WCT
-
-    %% Engine dependencies
-    ME -->|owns| CR
-    ME -->|uses| MCP
-    ME -->|uses| MT
-    CR -->|uses| TP
-    CR -->|uses| VR
-    CR -->|uses| MT
-    CR -->|notifies| MRL
-
-    %% Config
-    PFCP -.->|implements| MCP
-    MCP -->|provides| CC
-    MCP -->|provides| SC
-    MCP -->|provides| TPC
-
-    %% Validation
-    VR -->|contains| V
-    HSV -.->|implements| V
-    CV -.->|implements| V
-    RV -.->|implements| V
-    MDV -.->|implements| V
-    XPV -.->|implements| V
-
-    %% Transport
-    WCT -.->|implements| MT
-    WCT -->|uses| HCR
-    WCT -->|uses| HC
-
-    %% SPI
-    MT -->|accepts| MReq
-    MT -->|returns| MRes
-    MRes -->|contains| TS
-
-    %% Model (used everywhere)
-    MER -->|contains| MS
-    MER -->|contains| MRes
-    CR -->|produces| MER
+Key relationships (not drawn above):
+  CheckRunner            ──uses──▶          MonitorTransport
+  CheckRunner            ──uses──▶          ValidatorRegistry
+  CheckRunner            ──produces──▶      MonitorExecutionResult
+  MonitorEngine          ──uses──▶          MonitorConfigProvider
+  WireClientTransport    ──uses──▶          HttpClientRegistry / HttpClient
+  MonitorTransport       ──accepts──▶       MonitorRequest
+  MonitorTransport       ──returns──▶       MonitorResult
+  MonitorResult          ──contains──▶      TransportStatus
+  MonitorExecutionResult ──contains──▶      MonitorStatus, MonitorResult
+  PropertiesFileConfig…  ──implements──▶    MonitorConfigProvider
+  All built-in validators ──implement──▶    Validator
 ```
 
 ### Layered view (simplified)
