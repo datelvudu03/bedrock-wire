@@ -77,67 +77,69 @@ model, or SPI.
 
 ### Full module dependency map
 
+```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ spring  (auto-configuration)                                         │
-│ │
-│ BedrockWireClientAutoConfiguration │
-│ BedrockWireClientProperties │
-│ ParamFileClientRegistrar ──uses──▶ ParamFileClientConfigAdapter│
-│ │ │
-│ ▼ │
-│ ClientProperties │
-│ TlsProfileProperties │
+│                                                                      │
+│   BedrockWireClientAutoConfiguration                                 │
+│   BedrockWireClientProperties                                        │
+│   ParamFileClientRegistrar  ──uses──▶  ParamFileClientConfigAdapter  │
+│                                                  │                   │
+│                                                  ▼                   │
+│                                          ClientProperties            │
+│                                          TlsProfileProperties        │
 └───────────────┬──────────────────────────────────┬──────────────────┘
-│ creates │ builds
-▼ ▼
-┌─────────────────────────────────────┐ ┌────────────────────────────┐
-│ registry  (core)                     │ │ config │
-│ │ │ │
-│ «interface» HttpClientRegistry │◀─┤ HttpClientConfig │
-│ ▲ │ │ HttpClientRegistryConfig │
-│ │ implements │ └──────────┬─────────────────┘
-│ HttpClientRegistryImpl │ │ derives
-│ │ creates │ ▼
-│ ▼ │ ┌────────────────────────────┐
-│ «interface» HttpClient │ │ model │
-│ ▲ │ │ │
-│ │ implements │ │ TransportTarget │
-│ HttpClientImpl ──delegates──▶ WebClient │ TlsConfig │
-│ │ │ │ HttpRequest / Response │
-│ │ logs via │ │ HttpMethod │
-│ ▼ │ │ RequestOutcome │
-│ WireLogger │ └────────────────────────────┘
-│ │
-│ TlsSslContextFactory ──uses──▶ AliasPinningKeyManager │
-│ PoolMetricsReporter │
-│ ConnectionProvider (Reactor Netty) │
+                │ creates                          │ builds
+                ▼                                  ▼
+┌─────────────────────────────────────┐   ┌────────────────────────────┐
+│ registry  (core)                     │   │ config                     │
+│                                      │   │                            │
+│   «interface» HttpClientRegistry     │◀──┤   HttpClientConfig         │
+│        ▲                             │   │   HttpClientRegistryConfig │
+│        │ implements                  │   └──────────┬─────────────────┘
+│   HttpClientRegistryImpl             │              │ derives
+│        │ creates                     │              ▼
+│        ▼                             │   ┌────────────────────────────┐
+│   «interface» HttpClient             │   │ model                      │
+│        ▲                             │   │                            │
+│        │ implements                  │   │   TransportTarget          │
+│   HttpClientImpl ──delegates──▶ WebClient   TlsConfig                 │
+│        │                             │   │   HttpRequest / Response   │
+│        │ logs via                    │   │   HttpMethod               │
+│        ▼                             │   │   RequestOutcome           │
+│   WireLogger                         │   └────────────────────────────┘
+│                                      │
+│   TlsSslContextFactory ──uses──▶ AliasPinningKeyManager              │
+│   PoolMetricsReporter                                                │
+│   ConnectionProvider (Reactor Netty)                                 │
 └───────────────┬──────────────────────┘
-│ reports to
-▼
-┌─────────────────────────────────────┐ ┌────────────────────────────┐
-│ observability  (SPI)                 │ │ exception │
-│ │ │ │
-│ «interface» WireMetricsCollector │ │ BedrockWireException │
-│ «interface» TraceHeaderPropagator │ │ ▲ │
-│ │ │ │ extends │
-│ NoOpWireMetricsCollector │ │ RequestTimeoutException │
-│ NoOpTraceHeaderPropagator │ │ ReadTimeoutException │
-└─────────────────────────────────────┘ │ TransportException │
-│ PoolAcquisitionTimeout… │
-│ ResponseSizeExceeded… │
-│ RedirectNotSupported… │
-│ TlsConfigurationException│
-│ RegistryCapacityException│
-│ RegistryClosedException │
-│ InsecureConfiguration… │
-└────────────────────────────┘
+                │ reports to
+                ▼
+┌─────────────────────────────────────┐   ┌────────────────────────────┐
+│ observability  (SPI)                 │   │ exception                  │
+│                                      │   │                            │
+│   «interface» WireMetricsCollector   │   │   BedrockWireException     │
+│   «interface» TraceHeaderPropagator  │   │        ▲                   │
+│                                      │   │        │ extends           │
+│   NoOpWireMetricsCollector           │   │   RequestTimeoutException  │
+│   NoOpTraceHeaderPropagator          │   │   ReadTimeoutException     │
+└─────────────────────────────────────┘   │   TransportException       │
+                                          │   PoolAcquisitionTimeout…  │
+                                          │   ResponseSizeExceeded…    │
+                                          │   RedirectNotSupported…    │
+                                          │   TlsConfigurationException│
+                                          │   RegistryCapacityException│
+                                          │   RegistryClosedException  │
+                                          │   InsecureConfiguration…   │
+                                          └────────────────────────────┘
 
 Key relationships (not drawn above):
-HttpClientRegistryImpl ──keyed by clientId from──▶ HttpClientConfig
-HttpClientConfig ──contains──▶ TraceHeaderPropagator
-HttpClientImpl / PMR ──reports to──▶ WireMetricsCollector
-HttpClientImpl ──emits──▶ BedrockWireException
-TlsSslContextFactory ──reads──▶ TlsConfig
+  HttpClientRegistryImpl ──keyed by clientId from──▶ HttpClientConfig
+  HttpClientConfig       ──contains──▶              TraceHeaderPropagator
+  HttpClientImpl / PMR   ──reports to──▶            WireMetricsCollector
+  HttpClientImpl         ──emits──▶                 BedrockWireException
+  TlsSslContextFactory   ──reads──▶                 TlsConfig
+```
 
 ### Layered view (simplified)
 
