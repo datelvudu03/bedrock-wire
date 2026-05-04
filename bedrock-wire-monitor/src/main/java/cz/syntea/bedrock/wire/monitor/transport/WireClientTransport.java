@@ -147,24 +147,24 @@ public class WireClientTransport implements MonitorTransport {
 
         } catch (RequestTimeoutException e) {
             return buildErrorResult(TransportStatus.TIMEOUT, "ResponseTimeout",
-                    System.nanoTime() - startNanos);
+                    System.nanoTime() - startNanos, e);
 
         } catch (TransportException e) {
             TransportStatus status = classifyTransportException(e);
             return buildErrorResult(status, classifyTransportMessage(e),
-                    System.nanoTime() - startNanos);
+                    System.nanoTime() - startNanos, e);
 
         } catch (ReadTimeoutException e) {
             return buildErrorResult(TransportStatus.IO_ERROR, "ReadTimeout",
-                    System.nanoTime() - startNanos);
+                    System.nanoTime() - startNanos, e);
 
         } catch (ResponseSizeExceededException e) {
             return buildErrorResult(TransportStatus.IO_ERROR, "ResponseSizeExceeded",
-                    System.nanoTime() - startNanos);
+                    System.nanoTime() - startNanos, e);
 
         } catch (PoolAcquisitionTimeoutException e) {
             return buildErrorResult(TransportStatus.POOL_EXHAUSTED, "PoolExhausted",
-                    System.nanoTime() - startNanos);
+                    System.nanoTime() - startNanos, e);
 
         } catch (RedirectNotSupportedException e) {
             // Spec B.7: 3xx status propagated as RESPONSE_RECEIVED
@@ -181,7 +181,7 @@ public class WireClientTransport implements MonitorTransport {
             log.error("Unexpected exception from HttpClient for service '{}': {}",
                     request.getServiceName(), e.getMessage(), e);
             return buildErrorResult(TransportStatus.IO_ERROR,
-                    "Unexpected: " + e.getMessage(), System.nanoTime() - startNanos);
+                    "Unexpected: " + e.getMessage(), System.nanoTime() - startNanos, e);
         }
     }
 
@@ -325,11 +325,14 @@ public class WireClientTransport implements MonitorTransport {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    private MonitorResult buildErrorResult(TransportStatus status, String errorMessage, long elapsedNanos) {
+    private MonitorResult buildErrorResult(TransportStatus status,
+                                           String errorMessage,
+                                           long elapsedNanos, Exception e) {
         return MonitorResult.builder()
                 .transportStatus(status)
                 .httpStatus(0)
                 .errorMessage(errorMessage)
+                .exception(e)
                 .transportDuration(Duration.ofNanos(elapsedNanos))
                 .build();
     }

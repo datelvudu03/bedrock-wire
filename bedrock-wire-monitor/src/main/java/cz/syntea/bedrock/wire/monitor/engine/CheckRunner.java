@@ -94,12 +94,10 @@ public class CheckRunner {
             result = doExecute(checkConfig, serviceConfig, requestId, startedAt);
         } catch (TemplateProcessor.TemplateException e) {
             log.error("Template error in check '{}': {}", checkConfig.getCheckName(), e.getMessage());
-            result = buildErrorResult(checkConfig, serviceConfig, requestId,
-                    startedAt, e.getMessage());
+            result = buildErrorResult(checkConfig, serviceConfig, requestId, startedAt, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Unexpected error in check '{}': {}", checkConfig.getCheckName(), e.getMessage(), e);
-            result = buildErrorResult(checkConfig, serviceConfig, requestId,
-                    startedAt, "Internal error: " + e.getMessage());
+            result = buildErrorResult(checkConfig, serviceConfig, requestId, startedAt, "Internal error: " + e.getMessage(), e);
         }
 
         notifyListeners(result);
@@ -293,12 +291,14 @@ public class CheckRunner {
                                                     ServiceConfig serviceConfig,
                                                     String requestId,
                                                     Instant startedAt,
-                                                    String message) {
+                                                    String message,
+                                                    Exception e) {
         Instant finishedAt = Instant.now();
         MonitorResult emptyResult = MonitorResult.builder()
                 .transportStatus(TransportStatus.IO_ERROR)
                 .httpStatus(0)
                 .errorMessage(message)
+                .exception(e)
                 .build();
 
         return MonitorExecutionResult.builder()

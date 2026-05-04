@@ -66,6 +66,8 @@ public class MonitorResult {
      */
     Duration transportDuration;
 
+    Exception exception;
+
     @Override
     public String toString() {
         return JsonFormat.toJson(this);
