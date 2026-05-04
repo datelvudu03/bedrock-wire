@@ -139,17 +139,17 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
      */
     private void logConfigurationSummary() {
         StringBuilder sb = new StringBuilder();
-        sb.append("\n╔══════════════════════════════════════════════════════════════╗");
-        sb.append("\n║              MONITOR CONFIGURATION SUMMARY                  ║");
-        sb.append("\n╠══════════════════════════════════════════════════════════════╣");
+
+        sb.append("\n                           MONITOR CONFIGURATION SUMMARY                         ");
+
 
         // Services
-        sb.append("\n║  Services (").append(services.size()).append("):");
+        sb.append("\n  Services (").append(services.size()).append("):");
         if (services.isEmpty()) {
-            sb.append("\n║    (none)");
+            sb.append("\n    (none)");
         } else {
             for (ServiceConfig svc : services) {
-                sb.append("\n║    ").append(svc.getServiceName())
+                sb.append("\n    ").append(svc.getServiceName())
                         .append(" → ").append(svc.getUrl());
                 if (!svc.getTransportProperties().isEmpty()) {
                     sb.append(" [");
@@ -162,12 +162,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         }
 
         // Checks
-        sb.append("\n║  Checks (").append(checks.size()).append("):");
+        sb.append("\n  Checks (").append(checks.size()).append("):");
         if (checks.isEmpty()) {
-            sb.append("\n║    (none)");
+            sb.append("\n    (none)");
         } else {
             for (CheckConfig chk : checks) {
-                sb.append("\n║    ").append(chk.getCheckName())
+                sb.append("\n    ").append(chk.getCheckName())
                         .append(" → service=").append(chk.getServiceName())
                         .append(", ").append(chk.getMethod())
                         .append(" ").append(chk.getPath() != null ? chk.getPath() : "/");
@@ -189,12 +189,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         }
 
         // TLS profiles
-        sb.append("\n║  TLS profiles (").append(tlsProfiles.size()).append("):");
+        sb.append("\n  TLS profiles (").append(tlsProfiles.size()).append("):");
         if (tlsProfiles.isEmpty()) {
-            sb.append("\n║    (none)");
+            sb.append("\n    (none)");
         } else {
             for (TlsProfileConfig tls : tlsProfiles) {
-                sb.append("\n║    ").append(tls.getProfileName());
+                sb.append("\n    ").append(tls.getProfileName());
                 if (tls.getClientCert() != null) {
                     sb.append(" [mTLS: ").append(tls.getClientCertType())
                             .append(" ").append(tls.getClientCert()).append("]");
@@ -210,9 +210,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         }
 
         // Shutdown
-        sb.append("\n║  Shutdown timeout: ").append(formatDuration(shutdownTimeout));
-        sb.append("\n╚══════════════════════════════════════════════════════════════╝");
-
+        sb.append("\n  Shutdown timeout: ").append(formatDuration(shutdownTimeout));
         log.info("{}", sb);
     }
 
