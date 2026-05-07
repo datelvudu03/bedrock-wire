@@ -247,8 +247,8 @@ The name `default` cannot be used as a service or check name. It is reserved for
 │  scheduler,              mapping, listener  contains,    │
 │  virtual threads)        notification)      regex, ...)  │
 │                                                         │
-│  PropertiesFile         TemplateProcessor               │
-│  ConfigProvider         ($(param), $(uuid))             │
+│  PropertiesFile         TemplateRenderer               │
+│  ConfigProvider         (FreeMarker, ${param})         │
 └──────────────────────────┬──────────────────────────────┘
                            │
              ══════════════╪══════════════
@@ -298,23 +298,27 @@ Validators run against the HTTP response (only when `transportStatus == RESPONSE
 
 ## Templates
 
-If a check defines `templateFile`, the body is loaded from that file (UTF-8) and variables are substituted:
+If a check defines `templateFile`, the body is rendered by [`bedrock-wire-template`](../bedrock-wire-template/README.md)
+(Apache FreeMarker). All template syntax is native FreeMarker.
 
-**Static parameters** — `$(name)` is replaced with the value of `monitor.check.<n>.param.name`.
+**Static parameters** — `${name}` is replaced with the value of `monitor.check.<n>.param.name`.
 
-**Dynamic variables:**
+**Dynamic values (FreeMarker built-ins):**
 
-- `$(uuid)` — random UUID v4, unique per request
-- `$(timestamp)` — current UTC time in ISO 8601 format
+- `${statics['java.util.UUID'].randomUUID()}` — random UUID v4, unique per request
+- `${.now?iso_utc}` — current UTC time in ISO 8601 (second precision)
+- `${.now?iso_utc_ms}` — current UTC time in ISO 8601 (millisecond precision)
+- `${name!'fallback'}` — default value when `name` is undefined
+- `<#if cond>...</#if>`, `<#list items as i>...</#list>` — control flow
 
 Example template (`health-check.xml`):
 
 ```xml
 
 <healthCheck>
-    <clientId>$(clientId)</clientId>
-    <requestId>$(uuid)</requestId>
-    <timestamp>$(timestamp)</timestamp>
+    <clientId>${clientId}</clientId>
+    <requestId>${statics['java.util.UUID'].randomUUID()}</requestId>
+    <timestamp>${.now?iso_utc}</timestamp>
 </healthCheck>
 ```
 
@@ -325,7 +329,15 @@ monitor.check.health.templateFile=/templates/health-check.xml
 monitor.check.health.param.clientId=monitor-prod
 ```
 
-Invalid UTF-8 in the template file causes the check run to fail with `MonitorStatus.ERROR`.
+**Error behavior:** Invalid UTF-8 in the template file, missing files, undefined variables, and FreeMarker syntax
+errors all cause the check run to fail with `MonitorStatus.ERROR`. Error messages include the template path,
+line/column, and the names of available parameters (`availableParams=[...]`).
+
+**Customization:** The auto-configuration registers a default `TemplateRenderer` bean from
+`bedrock-wire-template`'s auto-config. Provide your own `@Bean TemplateRenderer` to override (e.g., to enable
+hot-reload via `templateUpdateDelay` or use a custom engine).
+
+For the full FreeMarker reference, see the [FreeMarker manual](https://freemarker.apache.org/docs/index.html).
 
 ---
 
@@ -454,7 +466,7 @@ transport.
 stub("myService",StubTransport.response(200, "<status>OK</status>"));
 
 CheckRunner runner = new CheckRunner(transport, new ValidatorRegistry(),
-        new TemplateProcessor(), List.of(result -> { /* assert */ }));
+        TemplateRenderer.create(), List.of(result -> { /* assert */ }));
 
 MonitorExecutionResult result = runner.execute(checkConfig, serviceConfig);
 

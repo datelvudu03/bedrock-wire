@@ -8,6 +8,7 @@ import cz.syntea.bedrock.wire.monitor.model.HttpMethod;
 import cz.syntea.bedrock.wire.monitor.model.MonitorExecutionResult;
 import cz.syntea.bedrock.wire.monitor.support.StubTransport;
 import cz.syntea.bedrock.wire.monitor.validation.ValidatorRegistry;
+import cz.syntea.bedrock.wire.template.TemplateRenderer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -134,7 +135,7 @@ class MonitorEngineTest {
         MonitorResultListener listener = results::add;
 
         return new MonitorEngine(provider, transport, new ValidatorRegistry(),
-                new TemplateProcessor(), List.of(listener), Duration.ofSeconds(5));
+                TemplateRenderer.create(), List.of(listener), Duration.ofSeconds(5));
     }
 
     private CheckConfig checkConfig(String checkName, String serviceName, Duration interval) {

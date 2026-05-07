@@ -6,6 +6,7 @@ import cz.syntea.bedrock.wire.monitor.config.ServiceConfig;
 import cz.syntea.bedrock.wire.monitor.listener.MonitorResultListener;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorTransport;
 import cz.syntea.bedrock.wire.monitor.validation.ValidatorRegistry;
+import cz.syntea.bedrock.wire.template.TemplateRenderer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
@@ -48,6 +49,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * <h3>Phase ordering</h3>
  * Runs at phase {@code Integer.MAX_VALUE - 100}: starts late (after wire-client
  * registry), stops early (before wire-client registry closes).
+ *
+ * <h3>Template rendering</h3>
+ * The supplied {@link TemplateRenderer} is forwarded to the internal {@link CheckRunner}
+ * and used for all {@code templateFile} body rendering. Resolution policy
+ * (user-provided bean vs. internal default) is the responsibility of the
+ * Spring auto-configuration.
  */
 @Slf4j
 public class MonitorEngine implements SmartLifecycle {
@@ -57,7 +64,7 @@ public class MonitorEngine implements SmartLifecycle {
     private final MonitorConfigProvider configProvider;
     private final MonitorTransport transport;
     private final ValidatorRegistry validatorRegistry;
-    private final TemplateProcessor templateProcessor;
+    private final TemplateRenderer templateRenderer;
     private final List<MonitorResultListener> listeners;
     private final Duration shutdownTimeout;
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new HashMap<>();
@@ -72,20 +79,20 @@ public class MonitorEngine implements SmartLifecycle {
      * @param configProvider    the configuration provider; never {@code null}
      * @param transport         the transport implementation; never {@code null}
      * @param validatorRegistry the validator registry; never {@code null}
-     * @param templateProcessor the template processor; never {@code null}
+     * @param templateRenderer  the template renderer; never {@code null}
      * @param listeners         the result listeners; never {@code null}, may be empty
      * @param shutdownTimeout   grace period for graceful shutdown; never {@code null}
      */
     public MonitorEngine(MonitorConfigProvider configProvider,
                          MonitorTransport transport,
                          ValidatorRegistry validatorRegistry,
-                         TemplateProcessor templateProcessor,
+                         TemplateRenderer templateRenderer,
                          List<MonitorResultListener> listeners,
                          Duration shutdownTimeout) {
         this.configProvider = configProvider;
         this.transport = transport;
         this.validatorRegistry = validatorRegistry;
-        this.templateProcessor = templateProcessor;
+        this.templateRenderer = templateRenderer;
         this.listeners = listeners != null ? listeners : List.of();
         this.shutdownTimeout = shutdownTimeout != null ? shutdownTimeout : Duration.ofSeconds(30);
     }
@@ -119,7 +126,7 @@ public class MonitorEngine implements SmartLifecycle {
 
         // Create check runner
         CheckRunner checkRunner = new CheckRunner(
-                transport, validatorRegistry, templateProcessor, listeners);
+                transport, validatorRegistry, templateRenderer, listeners);
 
         // Start scheduler
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {

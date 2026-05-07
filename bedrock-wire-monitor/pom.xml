@@ -33,6 +33,12 @@
             <optional>true</optional>
         </dependency>
 
+        <dependency>
+            <groupId>cz.syntea.bedrock</groupId>
+            <artifactId>syntea-bedrock-wire-template</artifactId>
+            <version>${revision}${changelist}</version>
+        </dependency>
+
         <!-- ******** CIZI ARTEFAKTY ********* -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
