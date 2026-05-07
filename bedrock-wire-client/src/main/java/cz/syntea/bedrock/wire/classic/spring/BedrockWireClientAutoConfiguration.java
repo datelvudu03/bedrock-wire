@@ -24,7 +24,7 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * Auto-configuration for {@code bedrock-wire-client}.
+ * Autoconfiguration for {@code bedrock-wire-client}.
  *
  * <p>Registers the core beans ({@link HttpClientRegistry}, {@link WireMetricsCollector},
  * {@link TraceHeaderPropagator}) and conditionally enables client auto-registration
