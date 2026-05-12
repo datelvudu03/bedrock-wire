@@ -55,7 +55,7 @@ cz.syntea.bedrock.wire.monitor/
 ├── model/         Domain enums and DTOs — no business logic, no dependencies
 ├── config/        Configuration model and properties file parser
 ├── validation/    Validator interface, built-in implementations, registry
-├── engine/        Core orchestration — scheduler, check runner, template processor
+├── engine/        Core orchestration — scheduler, check runner (templates delegated to bedrock-wire-template)
 ├── listener/      Output interface for check results
 ├── transport/     Default WireClientTransport (optional dependency on wire-client)
 └── spring/        Spring Boot auto-configuration and properties
@@ -93,14 +93,14 @@ The `transport` package depends on `spi` + `config` + the external `bedrock-wire
 │      │ impl │  │ FileConfig   │  │     │        │  │ ┌─────────────┐ │
 │ HttpStatus… │  │ Provider     │  │     │ uses   │  │ │ spi         │ │
 │ Contains…   │  │      │       │  │     ▼        │◀─┤ │             │ │
-│ Regex…      │  │      │ provides  TemplateProc  │  │ │ «interface» │ │
+│ Regex…      │  │      │ provides     │       │  │ │ «interface» │ │
 │ MaxDuration…│  │      ▼       │  │              │  │ │ Monitor     │ │
 │ XPath…      │  │ CheckConfig  │  │              │  │ │ Transport   │ │
 └──────┬──────┘  │ ServiceConfig│  └──────┬───────┘  │ │      │      │ │
        │         │ TlsProfile…  │         │          │ │      │ uses │ │
-       │ contains│              │         │          │ │      ▼      │ │
-       │         └──────────────┘         │          │ │ Monitor     │ │
-       │                                  │ notifies │ │ Request     │ │
+       │ contains│              │         │ uses     │ │      ▼      │ │
+       │         └──────────────┘         │ Template │ │ Monitor     │ │
+       │                                  │ Renderer │ │ Request     │ │
        └──── (used by CheckRunner) ───────┤          │ │ Monitor     │ │
                                           ▼          │ │ Result      │ │
                                   ┌──────────────┐   │ │ Transport   │ │
@@ -118,12 +118,21 @@ The `transport` package depends on `spi` + `config` + the external `bedrock-wire
 │   MonitorStatus            │                       │ HttpClient       │
 │   ValidationVerdict        │                       └──────────────────┘
 │   ValidationResult         │
-│   MonitorExecutionResult ──── produced by CheckRunner
-└────────────────────────────┘
+│   MonitorExecutionResult ──── produced by CheckRunner       ┌──────────────────┐
+└────────────────────────────┘                                │ bedrock-wire-    │
+                                                              │ template (ext.)  │
+                                                              │                  │
+                                                              │ TemplateRenderer │
+                                                              │ Params           │
+                                                              └──────────────────┘
+                                                                       ▲
+                                                               used by │
+                                                                CheckRunner
 
 Key relationships (not drawn above):
   CheckRunner            ──uses──▶          MonitorTransport
   CheckRunner            ──uses──▶          ValidatorRegistry
+  CheckRunner            ──uses──▶          TemplateRenderer (bedrock-wire-template)
   CheckRunner            ──produces──▶      MonitorExecutionResult
   MonitorEngine          ──uses──▶          MonitorConfigProvider
   WireClientTransport    ──uses──▶          HttpClientRegistry / HttpClient
@@ -146,7 +155,7 @@ Key relationships (not drawn above):
 │      ↓ creates beans                                         │
 ├─────────────────────────────────────────────────────────────┤
 │  engine/                                                     │
-│  MonitorEngine ──→ CheckRunner ──→ TemplateProcessor         │
+│  MonitorEngine ──→ CheckRunner ──→ TemplateRenderer (ext.)   │
 │      ↓ uses                    ↓ uses                        │
 ├─────────────────────────────────────────────────────────────┤
 │  config/           validation/         listener/             │
@@ -302,18 +311,20 @@ graph LR
 skips the entire class when `bedrock-wire-client` is not wired. Creates the `monitorTransport` bean.
 
 **`BedrockWireMonitorAutoConfiguration`** — runs second. Creates `ValidatorRegistry`, `MonitorConfigProvider`,
-`TemplateProcessor`, and `MonitorEngine`. The engine bean has `@ConditionalOnBean(MonitorTransport.class)` which now
+and `MonitorEngine`. The `TemplateRenderer` is resolved via `ObjectProvider.getIfAvailable(TemplateRenderer::create)`
+— uses a context bean if present (e.g. from `bedrock-wire-template`'s `TemplateAutoConfiguration`), otherwise
+constructs an internal default. The engine bean has `@ConditionalOnBean(MonitorTransport.class)` which now
 correctly sees the transport from the first class.
 
 ### Bean registration summary
 
-| Bean                    | Auto-config class | Condition                                                              | Overridable |
-|-------------------------|-------------------|------------------------------------------------------------------------|-------------|
-| `ValidatorRegistry`     | Main              | `@ConditionalOnMissingBean`                                            | Yes         |
-| `MonitorConfigProvider` | Main              | `@ConditionalOnMissingBean`                                            | Yes         |
-| `TemplateProcessor`     | Main              | `@ConditionalOnMissingBean`                                            | Yes         |
-| `MonitorTransport`      | Transport         | `@ConditionalOnBean(HttpClientRegistry)` + `@ConditionalOnMissingBean` | Yes         |
-| `MonitorEngine`         | Main              | `@ConditionalOnBean(MonitorTransport)` + `@ConditionalOnMissingBean`   | Yes         |
+| Bean                    | Auto-config class | Condition                                                                                                                                                                                        | Overridable |
+|-------------------------|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|
+| `ValidatorRegistry`     | Main              | `@ConditionalOnMissingBean`                                                                                                                                                                      | Yes         |
+| `MonitorConfigProvider` | Main              | `@ConditionalOnMissingBean`                                                                                                                                                                      | Yes         |
+| `TemplateRenderer`      | (external)        | `@ConditionalOnMissingBean(TemplateRenderer.class)` in `TemplateAutoConfiguration` (`bedrock-wire-template`); monitor uses `ObjectProvider.getIfAvailable(TemplateRenderer::create)` as fallback | Yes         |
+| `MonitorTransport`      | Transport         | `@ConditionalOnBean(HttpClientRegistry)` + `@ConditionalOnMissingBean`                                                                                                                           | Yes         |
+| `MonitorEngine`         | Main              | `@ConditionalOnBean(MonitorTransport)` + `@ConditionalOnMissingBean`                                                                                                                             | Yes         |
 
 ### Cascading skip behavior
 
@@ -325,7 +336,8 @@ HttpClientRegistry missing
         → No MonitorTransport bean
             → MonitorEngine SKIPPED (@ConditionalOnBean(MonitorTransport))
 
-Still loaded: ValidatorRegistry, MonitorConfigProvider, TemplateProcessor
+Still loaded: ValidatorRegistry, MonitorConfigProvider (TemplateRenderer is a separate module's bean —
+unaffected by this cascade)
 ```
 
 This allows partial usage: load the config and validators without starting the engine (useful for config validation
@@ -403,7 +415,7 @@ Thread.ofVirtual().start(() -> {
         CheckRunner.execute(checkConfig, serviceConfig)
             │
             ├── buildRequest()      → MonitorRequest
-            ├── loadBody()          → TemplateProcessor (if templateFile)
+            ├── loadBody()          → TemplateRenderer.render() (if templateFile)
             │
             ├── transport.execute() → MonitorResult
             │       │
@@ -711,8 +723,10 @@ The auto-configuration adapts based on which modules are on the classpath and wh
 │                                                              │
 │  @Bean validatorRegistry                                     │
 │  @Bean monitorConfigProvider ←── auto-detects PropertiesCfg  │
-│  @Bean templateProcessor                                     │
-│  @Bean monitorEngine(configProvider, transport, ...)         │
+│  @Bean monitorEngine(configProvider, transport,              │
+│                      ObjectProvider<TemplateRenderer>, ...)  │
+│    → templateRenderer = provider                             │
+│        .getIfAvailable(TemplateRenderer::create)             │
 │    → SmartLifecycle.start():                                 │
 │      1. transport.init(services) — creates HttpClients       │
 │      2. starts scheduler                                     │
@@ -769,8 +783,13 @@ Key points:
    └── MonitorTransport bean (conditional: HttpClientRegistry exists)
 
 3. BedrockWireMonitorAutoConfiguration
-   ├── ValidatorRegistry, ConfigProvider, TemplateProcessor
-   └── MonitorEngine (conditional: MonitorTransport exists)
+   @AutoConfiguration(after = TemplateAutoConfiguration)
+   ├── ValidatorRegistry, ConfigProvider
+   ├── MonitorEngine (conditional: MonitorTransport exists)
+   │   └── ObjectProvider<TemplateRenderer>.getIfAvailable(TemplateRenderer::create)
+   │       → user/auto-config bean if present, else internal default
+   └── (TemplateRenderer bean is registered separately by TemplateAutoConfiguration
+        from bedrock-wire-template, before this auto-config runs)
 ```
 
 The `after/before` on `WireClientTransportAutoConfiguration` ensures: registry exists before transport is created,
@@ -819,7 +838,7 @@ Context refresh
 │   ├── ValidatorRegistry
 │   ├── MonitorConfigProvider ← auto-detects PropertiesCfg
 │   ├── MonitorTransport (WireClientTransport) ← TLS profiles registered here
-│   ├── TemplateProcessor
+│   ├── TemplateRenderer (from bedrock-wire-template's TemplateAutoConfiguration)
 │   ├── MonitorEngine ← created but NOT started yet
 │   └── ParamFileClientRegistrar ← only in standalone mode
 │

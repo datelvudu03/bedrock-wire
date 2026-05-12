@@ -3,11 +3,12 @@ package cz.syntea.bedrock.wire.monitor.spring;
 import cz.syntea.bedrock.wire.monitor.config.MonitorConfigProvider;
 import cz.syntea.bedrock.wire.monitor.config.PropertiesFileConfigProvider;
 import cz.syntea.bedrock.wire.monitor.engine.MonitorEngine;
-import cz.syntea.bedrock.wire.monitor.engine.TemplateProcessor;
 import cz.syntea.bedrock.wire.monitor.listener.MonitorResultListener;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorTransport;
 import cz.syntea.bedrock.wire.monitor.validation.Validator;
 import cz.syntea.bedrock.wire.monitor.validation.ValidatorRegistry;
+import cz.syntea.bedrock.wire.template.TemplateRenderer;
+import cz.syntea.bedrock.wire.template.autoconfigure.TemplateAutoConfiguration;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -37,27 +38,45 @@ import java.util.Set;
  *       any custom {@link Validator} beans from the context.</li>
  *   <li>{@link MonitorConfigProvider} — default implementation reading from
  *       the {@code .param} file specified by {@code bedrock.wire.monitor.config-file}.</li>
- *   <li>{@link MonitorTransport} — default {@link cz.syntea.bedrock.wire.monitor.transport.WireClientTransport}
+ *   <li>{@link MonitorTransport} — default
+ *       {@link cz.syntea.bedrock.wire.monitor.transport.WireClientTransport}
  *       registered by {@link WireClientTransportAutoConfiguration} when
  *       {@code HttpClientRegistry} is available.</li>
- *   <li>{@link TemplateProcessor} — template loading and variable substitution.</li>
  *   <li>{@link MonitorEngine} — the central orchestrator implementing
  *       {@link org.springframework.context.SmartLifecycle}.</li>
  * </ul>
  *
+ * <h3>Template rendering</h3>
+ * The {@link TemplateRenderer} used by {@link MonitorEngine} is resolved via
+ * {@link ObjectProvider}: if a {@link TemplateRenderer} bean exists in the context
+ * (typically registered by {@link TemplateAutoConfiguration} from
+ * {@code bedrock-wire-template}), it is reused. Otherwise an internal default is
+ * created via {@link TemplateRenderer#create()}. {@code @AutoConfiguration(after =
+ * TemplateAutoConfiguration.class)} ensures the user-provided / default-bean path
+ * is evaluated before this auto-config runs.
+ *
  * <h3>Customization</h3>
  * Declare your own {@code @Bean} of any of the above types to override defaults.
  * For example, provide a custom {@link MonitorTransport} to replace the
- * wire-client-based default.
+ * wire-client-based default, or a custom {@link TemplateRenderer} to apply
+ * non-default FreeMarker settings.
  *
  * <h3>Disabling</h3>
  * Set {@code bedrock.wire.monitor.enabled=false} to disable the entire monitor.
  */
 @Slf4j
-@AutoConfiguration
+@AutoConfiguration(after = TemplateAutoConfiguration.class)
 @EnableConfigurationProperties(BedrockWireMonitorProperties.class)
 @ConditionalOnProperty(name = "bedrock.wire.monitor.enabled", havingValue = "true", matchIfMissing = true)
 public class BedrockWireMonitorAutoConfiguration {
+
+    /**
+     * Bean names of Spring-internal {@link Properties} instances that must be
+     * excluded when auto-detecting the application's configuration bean.
+     */
+    private static final Set<String> SPRING_INFRASTRUCTURE_PROPERTIES = Set.of(
+            "systemProperties", "systemEnvironment"
+    );
 
     /**
      * Registers the {@link ValidatorRegistry} with built-in validators and any
@@ -76,14 +95,6 @@ public class BedrockWireMonitorAutoConfiguration {
     }
 
     /**
-     * Bean names of Spring-internal {@link Properties} instances that must be
-     * excluded when auto-detecting the application's configuration bean.
-     */
-    private static final Set<String> SPRING_INFRASTRUCTURE_PROPERTIES = Set.of(
-            "systemProperties", "systemEnvironment"
-    );
-
-    /**
      * Registers the default {@link MonitorConfigProvider} that reads the
      * {@code monitor.*} namespace.
      *
@@ -100,8 +111,8 @@ public class BedrockWireMonitorAutoConfiguration {
      *       and parse a standalone {@code .properties} file.</li>
      * </ol>
      *
-     * @param properties        the monitor starter properties
-     * @param validatorRegistry the validator registry (for alias validation)
+     * @param properties         the monitor starter properties
+     * @param validatorRegistry  the validator registry (for alias validation)
      * @param applicationContext the Spring application context
      * @return the config provider
      */
@@ -140,6 +151,9 @@ public class BedrockWireMonitorAutoConfiguration {
      * Scans the application context for {@link Properties} beans, filtering out
      * Spring infrastructure beans. Returns the single application bean if exactly
      * one is found, or {@code null} otherwise.
+     *
+     * @param context Spring application context; never {@code null}
+     * @return the single application {@link Properties} bean, or {@code null}
      */
     private Properties detectApplicationProperties(ApplicationContext context) {
         Map<String, Properties> allBeans = context.getBeansOfType(Properties.class);
@@ -165,6 +179,10 @@ public class BedrockWireMonitorAutoConfiguration {
 
     /**
      * Resolves the bean name for a given instance (for logging purposes).
+     *
+     * @param context Spring application context; never {@code null}
+     * @param bean    the bean instance to look up
+     * @return the bean name, or {@code "unknown"} if not found
      */
     private String getBeanName(ApplicationContext context, Properties bean) {
         return context.getBeansOfType(Properties.class).entrySet().stream()
@@ -175,34 +193,32 @@ public class BedrockWireMonitorAutoConfiguration {
     }
 
     /**
-     * Registers the {@link TemplateProcessor}.
-     *
-     * @return the template processor
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    public TemplateProcessor templateProcessor() {
-        return new TemplateProcessor();
-    }
-
-    /**
      * Registers the {@link MonitorEngine} orchestrator.
      *
      * <p>Implements {@link org.springframework.context.SmartLifecycle} for
      * auto-start on context refresh and graceful stop on context close.
      * Also exposes programmatic {@code start()} / {@code stop()}.
      *
-     * <p>Shutdown timeout resolution: if the config provider is a
-     * {@link PropertiesFileConfigProvider}, its parsed {@code monitor.executor.shutdownTimeout}
-     * value is used. Otherwise, {@code bedrock.wire.monitor.shutdown-timeout} from
-     * Spring properties is used (default: 30s).
+     * <h3>Template renderer resolution</h3>
+     * The {@link TemplateRenderer} is resolved through {@link ObjectProvider}:
+     * if a bean exists in the context (registered by {@link TemplateAutoConfiguration}
+     * or by the user), it is used; otherwise {@link TemplateRenderer#create()} is
+     * invoked to obtain a default. This preserves user customization while keeping
+     * the monitor functional in non-Spring usage of the engine API or when the
+     * template auto-configuration is disabled.
      *
-     * @param configProvider    the config provider
-     * @param transport         the transport
-     * @param validatorRegistry the validator registry
-     * @param templateProcessor the template processor
-     * @param listeners         all registered result listeners
-     * @param properties        the monitor starter properties (for shutdown timeout fallback)
+     * <h3>Shutdown timeout resolution</h3>
+     * If the config provider is a {@link PropertiesFileConfigProvider}, its parsed
+     * {@code monitor.executor.shutdownTimeout} value is used. Otherwise,
+     * {@code bedrock.wire.monitor.shutdown-timeout} from Spring properties is
+     * used (default: 30s).
+     *
+     * @param configProvider          the config provider
+     * @param transport               the transport
+     * @param validatorRegistry       the validator registry
+     * @param templateRendererProvider provider for the optional {@link TemplateRenderer} bean
+     * @param listeners               all registered result listeners
+     * @param properties              the monitor starter properties (for shutdown timeout fallback)
      * @return the monitor engine
      */
     @Bean
@@ -212,7 +228,7 @@ public class BedrockWireMonitorAutoConfiguration {
             MonitorConfigProvider configProvider,
             MonitorTransport transport,
             ValidatorRegistry validatorRegistry,
-            TemplateProcessor templateProcessor,
+            ObjectProvider<TemplateRenderer> templateRendererProvider,
             ObjectProvider<List<MonitorResultListener>> listeners,
             BedrockWireMonitorProperties properties) {
 
@@ -222,12 +238,18 @@ public class BedrockWireMonitorAutoConfiguration {
             shutdownTimeout = concreteProvider.getShutdownTimeout();
         }
 
+        // Resolve TemplateRenderer: prefer user bean, fall back to default factory
+        TemplateRenderer templateRenderer = templateRendererProvider
+                .getIfAvailable(TemplateRenderer::create);
+        log.info("MonitorEngine using TemplateRenderer: {}",
+                templateRendererProvider.getIfAvailable() != null ? "context bean" : "internal default");
+
         List<MonitorResultListener> listenerList = listeners.getIfAvailable();
         return new MonitorEngine(
                 configProvider,
                 transport,
                 validatorRegistry,
-                templateProcessor,
+                templateRenderer,
                 listenerList != null ? listenerList : List.of(),
                 shutdownTimeout
         );
@@ -242,6 +264,8 @@ public class BedrockWireMonitorAutoConfiguration {
      * <p>Fires on {@link ContextRefreshedEvent}, after all beans are created
      * and conditional evaluations are complete. This catches the silent failure
      * where config loads successfully but the transport/engine chain is broken.
+     *
+     * @param event Spring context-refreshed event; never {@code null}
      */
     @EventListener(ContextRefreshedEvent.class)
     public void onStartupDiagnostics(ContextRefreshedEvent event) {

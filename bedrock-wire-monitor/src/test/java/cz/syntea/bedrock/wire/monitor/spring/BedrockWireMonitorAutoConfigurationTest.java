@@ -1,13 +1,23 @@
 package cz.syntea.bedrock.wire.monitor.spring;
 
 import cz.syntea.bedrock.wire.monitor.config.MonitorConfigProvider;
+import cz.syntea.bedrock.wire.monitor.config.ServiceConfig;
 import cz.syntea.bedrock.wire.monitor.engine.MonitorEngine;
-import cz.syntea.bedrock.wire.monitor.engine.TemplateProcessor;
+import cz.syntea.bedrock.wire.monitor.spi.MonitorRequest;
+import cz.syntea.bedrock.wire.monitor.spi.MonitorResult;
 import cz.syntea.bedrock.wire.monitor.spi.MonitorTransport;
+import cz.syntea.bedrock.wire.monitor.spi.TransportStatus;
 import cz.syntea.bedrock.wire.monitor.validation.ValidatorRegistry;
+import cz.syntea.bedrock.wire.template.TemplateRenderer;
+import cz.syntea.bedrock.wire.template.autoconfigure.TemplateAutoConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.time.Duration;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,8 +30,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Note: {@link WireClientTransportAutoConfiguration} is loaded but will NOT
  * activate because there is no {@code HttpClientRegistry} bean in the test context
  * (class-level {@code @ConditionalOnBean(HttpClientRegistry.class)} fails).
+ * For tests that need {@link MonitorEngine} construction, {@link StubTransportConfig}
+ * provides a no-op {@link MonitorTransport} bean.
  */
 class BedrockWireMonitorAutoConfigurationTest {
+
+    private static final String CONFIG_FILE_PROP =
+            "bedrock.wire.monitor.config-file=src/test/resources/monitor-test.properties";
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(
@@ -31,8 +46,7 @@ class BedrockWireMonitorAutoConfigurationTest {
     @Test
     void shouldRegisterValidatorRegistryBean() {
         contextRunner
-                .withPropertyValues(
-                        "bedrock.wire.monitor.config-file=src/test/resources/monitor-test.properties")
+                .withPropertyValues(CONFIG_FILE_PROP)
                 .run(context -> {
                     assertThat(context).hasSingleBean(ValidatorRegistry.class);
                     ValidatorRegistry registry = context.getBean(ValidatorRegistry.class);
@@ -44,22 +58,13 @@ class BedrockWireMonitorAutoConfigurationTest {
     @Test
     void shouldRegisterConfigProviderBean() {
         contextRunner
-                .withPropertyValues(
-                        "bedrock.wire.monitor.config-file=src/test/resources/monitor-test.properties")
+                .withPropertyValues(CONFIG_FILE_PROP)
                 .run(context -> {
                     assertThat(context).hasSingleBean(MonitorConfigProvider.class);
                     MonitorConfigProvider provider = context.getBean(MonitorConfigProvider.class);
                     assertThat(provider.getServices()).isNotEmpty();
                     assertThat(provider.getChecks()).isNotEmpty();
                 });
-    }
-
-    @Test
-    void shouldRegisterTemplateProcessorBean() {
-        contextRunner
-                .withPropertyValues(
-                        "bedrock.wire.monitor.config-file=src/test/resources/monitor-test.properties")
-                .run(context -> assertThat(context).hasSingleBean(TemplateProcessor.class));
     }
 
     @Test
@@ -94,15 +99,77 @@ class BedrockWireMonitorAutoConfigurationTest {
         // (class-level @ConditionalOnBean) → no MonitorTransport →
         // MonitorEngine skipped (@ConditionalOnBean(MonitorTransport.class))
         contextRunner
-                .withPropertyValues(
-                        "bedrock.wire.monitor.config-file=src/test/resources/monitor-test.properties")
+                .withPropertyValues(CONFIG_FILE_PROP)
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(MonitorTransport.class);
                     assertThat(context).doesNotHaveBean(MonitorEngine.class);
                     // Standalone beans still load fine
                     assertThat(context).hasSingleBean(ValidatorRegistry.class);
                     assertThat(context).hasSingleBean(MonitorConfigProvider.class);
-                    assertThat(context).hasSingleBean(TemplateProcessor.class);
                 });
+    }
+
+    @Test
+    void shouldUseTemplateRendererBeanWhenAvailable() {
+        contextRunner
+                .withConfiguration(AutoConfigurations.of(TemplateAutoConfiguration.class))
+                .withUserConfiguration(StubTransportConfig.class)
+                .withPropertyValues(CONFIG_FILE_PROP)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(TemplateRenderer.class);
+                    assertThat(context).hasSingleBean(MonitorEngine.class);
+                });
+    }
+
+    @Test
+    void shouldConstructEngineWithFallbackTemplateRendererWhenNoTemplateAutoConfig() {
+        // No TemplateAutoConfiguration loaded → no TemplateRenderer bean in context.
+        // BedrockWireMonitorAutoConfiguration must still construct MonitorEngine
+        // by falling back to TemplateRenderer.create() via ObjectProvider.
+        contextRunner
+                .withUserConfiguration(StubTransportConfig.class)
+                .withPropertyValues(CONFIG_FILE_PROP)
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(TemplateRenderer.class);
+                    assertThat(context).hasSingleBean(MonitorEngine.class);
+                });
+    }
+
+    /**
+     * Provides a no-op {@link MonitorTransport} bean so the {@link MonitorEngine}
+     * conditional ({@code @ConditionalOnBean(MonitorTransport.class)}) is satisfied
+     * without requiring the full {@code HttpClientRegistry} chain.
+     */
+    @Configuration
+    static class StubTransportConfig {
+
+        /**
+         * No-op transport for context tests.
+         *
+         * @return a stub {@link MonitorTransport}
+         */
+        @Bean
+        MonitorTransport monitorTransport() {
+            return new MonitorTransport() {
+                @Override
+                public void init(List<ServiceConfig> services) {
+                    // no-op
+                }
+
+                @Override
+                public MonitorResult execute(MonitorRequest request) {
+                    return MonitorResult.builder()
+                            .transportStatus(TransportStatus.IO_ERROR)
+                            .httpStatus(0)
+                            .errorMessage("stub")
+                            .build();
+                }
+
+                @Override
+                public void close(Duration timeout) {
+                    // no-op
+                }
+            };
+        }
     }
 }

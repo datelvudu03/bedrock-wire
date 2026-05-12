@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <parent>
         <groupId>cz.syntea.bedrock</groupId>
@@ -10,39 +10,36 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>syntea-bedrock-wire-monitor</artifactId>
-    <name>bedrock-wire-monitor</name>
+    <artifactId>syntea-bedrock-wire-template</artifactId>
+    <name>bedrock-wire-template</name>
     <packaging>jar</packaging>
 
     <description>
-        Konfigurovatelný HTTP monitor postavený na bedrock-wire-client.
-        Spouští HTTP checky v pravidelných intervalech, validuje odpovědi (HTTP status, obsah, regex, doba odezvy)
-        a reportuje výsledky přes MonitorResultListener.
-        Konfigurace přes properties namespace monitor.*.
+        HTTP body templating na bázi Apache FreeMarker.
+        Konzumováno modulem bedrock-wire-monitor (templateFile rendering) i jako standalone utility.
     </description>
 
     <properties>
+        <freemarker.version>2.3.34</freemarker.version>
     </properties>
 
     <dependencies>
-        <!-- ******** SYNTEA ARTEFAKTY ********* -->
-        <dependency>
-            <groupId>cz.syntea.bedrock</groupId>
-            <artifactId>syntea-bedrock-wire-client</artifactId>
-            <version>${revision}${changelist}</version>
-            <optional>true</optional>
-        </dependency>
-
-        <dependency>
-            <groupId>cz.syntea.bedrock</groupId>
-            <artifactId>syntea-bedrock-wire-template</artifactId>
-            <version>${revision}${changelist}</version>
-        </dependency>
-
         <!-- ******** CIZI ARTEFAKTY ********* -->
+        <dependency>
+            <groupId>org.freemarker</groupId>
+            <artifactId>freemarker</artifactId>
+            <version>${freemarker.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <dependency>
@@ -52,26 +49,22 @@
         </dependency>
 
         <dependency>
-            <groupId>jakarta.annotation</groupId>
-            <artifactId>jakarta.annotation-api</artifactId>
-        </dependency>
-
-        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
 
+        <!-- Test -->
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <optional>true</optional>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-            <optional>true</optional>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -83,33 +76,6 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <version>3.27.6</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-params</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

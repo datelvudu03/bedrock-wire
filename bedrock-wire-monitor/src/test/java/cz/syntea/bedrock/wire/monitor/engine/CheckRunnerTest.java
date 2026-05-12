@@ -10,6 +10,7 @@ import cz.syntea.bedrock.wire.monitor.spi.MonitorResult;
 import cz.syntea.bedrock.wire.monitor.spi.TransportStatus;
 import cz.syntea.bedrock.wire.monitor.support.StubTransport;
 import cz.syntea.bedrock.wire.monitor.validation.ValidatorRegistry;
+import cz.syntea.bedrock.wire.template.TemplateRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +44,7 @@ class CheckRunnerTest {
         runner = new CheckRunner(
                 transport,
                 new ValidatorRegistry(),
-                new TemplateProcessor(),
+                TemplateRenderer.create(),
                 List.of(listener)
         );
     }
@@ -207,7 +208,7 @@ class CheckRunnerTest {
             throw new RuntimeException("Listener error");
         };
         CheckRunner runnerWithBadListener = new CheckRunner(
-                transport, new ValidatorRegistry(), new TemplateProcessor(),
+                transport, new ValidatorRegistry(), TemplateRenderer.create(),
                 List.of(badListener, listenerResults::add));
 
         CheckConfig check = baseCheck().build();
@@ -215,15 +216,6 @@ class CheckRunnerTest {
 
         assertEquals(MonitorStatus.UP, result.getStatus());
         assertEquals(1, listenerResults.size()); // second listener still called
-    }
-
-    private CheckConfig.CheckConfigBuilder baseCheck() {
-        return CheckConfig.builder()
-                .checkName("testCheck")
-                .serviceName("testSvc")
-                .method(HttpMethod.GET)
-                .path("/ping")
-                .interval(Duration.ofSeconds(30));
     }
 
     @Test
@@ -279,6 +271,15 @@ class CheckRunnerTest {
         assertEquals(MonitorStatus.ERROR, result.getStatus());
         assertEquals(0, result.getAttempts());
         assertFalse(result.isTransportInvoked());
-        assertTrue(result.getMessage().contains("Template file does not exist"));
+        assertTrue(result.getMessage().contains("Template file not found"));
+    }
+
+    private CheckConfig.CheckConfigBuilder baseCheck() {
+        return CheckConfig.builder()
+                .checkName("testCheck")
+                .serviceName("testSvc")
+                .method(HttpMethod.GET)
+                .path("/ping")
+                .interval(Duration.ofSeconds(30));
     }
 }

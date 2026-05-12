@@ -1,0 +1,12 @@
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:ws="http://www.syntea.cz/gam/or/wscommon/2021/01">
+    <s:Header>
+        <ws:Request IdentZpravy="${statics['java.util.UUID'].randomUUID()}"
+                    Mode="${mode}"
+                    UserID="${userId}"
+                    Timestamp="${.now?iso_utc}"/>
+    </s:Header>
+    <s:Body>
+        <ws:PingFlow Flow="${flow!'B1WS_Get'}"/>
+    </s:Body>
+</s:Envelope>

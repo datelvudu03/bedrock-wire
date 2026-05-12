@@ -1,0 +1,7 @@
+{
+  "clientId": "monitor-prod",
+  "deployment": {
+    "env": "production",
+    "region": "eu-central"
+  }
+}
