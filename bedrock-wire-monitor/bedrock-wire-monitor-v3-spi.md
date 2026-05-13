@@ -180,7 +180,7 @@ see table below).
 | `validation.validators` | yes                     | check → default                   |
 | `method`                | yes                     | check → default                   |
 | `url`                   | no                      | service only                      |
-
+| `param.*`               | yes                     | check → default (merge)           |
 Transport-specific parameters (in the `monitor.service.<n>.transport.*` or `monitor.tls.*` namespaces) are NOT subject
 to monitor lookup rules. They are passed to the transport in `ServiceConfig.transportProperties` without further
 processing.
@@ -612,8 +612,15 @@ syntax is standard FreeMarker.
 
 ### 2.9.1 Parameters
 
-Keys `monitor.check.<check>.param.<name>` are passed to the template engine as a `Map<String, Object>`. Inside the
-template they are addressable as `${name}`.
+Template parameters can be defined at two levels:
+
+monitor.check.<check>.param.<name> — value for a specific check
+monitor.default.param.<name> — global fallback applied to all checks
+
+The two layers are merged per check (check overrides default on a per-key basis).
+Merging is case-sensitive (FreeMarker variable names are case-sensitive).
+The merged map is passed to the template engine as Map<String, Object>.
+Inside the template, values are addressable as ${name}.
 
 ### 2.9.2 Dynamic values (FreeMarker built-ins)
 
