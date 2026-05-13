@@ -480,8 +480,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
                 }
             }
 
-            // Template params (strip "param." prefix)
-            Map<String, String> templateParams = extractByPrefix(raw, "param.");
+            // Template params: merge default → check (check wins per key).
+            // param.* keys are case-sensitive (FreeMarker variable names).
+            Map<String, String> templateParams = new LinkedHashMap<>();
+            templateParams.putAll(extractByPrefix(defaults, "param."));
+            templateParams.putAll(extractByPrefix(raw, "param."));
+
 
             result.add(CheckConfig.builder()
                     .checkName(checkName)
