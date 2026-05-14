@@ -125,4 +125,13 @@ public class CheckConfig {
      */
     @Builder.Default
     Map<String, String> templateParams = Map.of();
+
+    /**
+     * Monitor-global environment-passthrough variables resolved from
+     * {@code monitor.templateEnv.vars} (spec §2.9.4). These are also merged into
+     * {@link #templateParams} as the lowest-precedence layer; this field exposes
+     * them separately for diagnostics. Never {@code null}; may be empty.
+     */
+    @Builder.Default
+    Map<String, String> templateEnv = Map.of();
 }

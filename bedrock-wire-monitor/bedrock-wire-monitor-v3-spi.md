@@ -212,20 +212,20 @@ may have only one value.
 ```java
 public class CheckConfig {
 
-    String checkName;
-    String serviceName;
+   String checkName;
+   String serviceName;
 
-    HttpMethod method;
-    String path;
-    String query;
-    String templateFile;
+   HttpMethod method;
+   String path;
+   String query;
+   String templateFile;
 
-    int retryCount;
-    Duration retryDelay;
+   int retryCount;
+   Duration retryDelay;
 
-    Map<String, String> headers;
-    List<String> validators;
-    Map<String, String> validationParams; // keys without the "validation." prefix
+   Map<String, String> headers;
+   List<String> validators;
+   Map<String, String> validationParams; // keys without the "validation." prefix
 
 }
 ```
@@ -233,15 +233,15 @@ public class CheckConfig {
 ```java
 public class ServiceConfig {
 
-    String serviceName;
+   String serviceName;
 
-    URI url;                    // service base URL; format depends on transport implementation
+   URI url;                    // service base URL; format depends on transport implementation
 
-    Duration interval;
+   Duration interval;
 
-    Map<String, String> headers;
+   Map<String, String> headers;
 
-    Map<String, String> transportProperties;  // opaque bag passed to the transport implementation
+   Map<String, String> transportProperties;  // opaque bag passed to the transport implementation
 
 }
 ```
@@ -260,9 +260,9 @@ implementation is responsible for validation in `init()`. Example:
 ```java
 public interface MonitorConfigProvider {
 
-    List<CheckConfig> getChecks();
+   List<CheckConfig> getChecks();
 
-    List<ServiceConfig> getServices();
+   List<ServiceConfig> getServices();
 
 }
 ```
@@ -446,33 +446,33 @@ resources.
 ```java
 public interface MonitorTransport {
 
-    /**
-     * Initializes the transport with service configuration.
-     * Called once at monitor startup, before the first execute().
-     *
-     * @param services list of service configurations
-     * @throws IllegalStateException    if the transport is already initialized
-     * @throws IllegalArgumentException if the configuration is invalid
-     */
-    void init(List<ServiceConfig> services);
+   /**
+    * Initializes the transport with service configuration.
+    * Called once at monitor startup, before the first execute().
+    *
+    * @param services list of service configurations
+    * @throws IllegalStateException    if the transport is already initialized
+    * @throws IllegalArgumentException if the configuration is invalid
+    */
+   void init(List<ServiceConfig> services);
 
-    /**
-     * Executes a single HTTP request synchronously.
-     * Called on the check run's virtual thread.
-     * MUST never throw — always returns a MonitorResult.
-     *
-     * @param request HTTP request descriptor
-     * @return transport result; never null
-     */
-    MonitorResult execute(MonitorRequest request);
+   /**
+    * Executes a single HTTP request synchronously.
+    * Called on the check run's virtual thread.
+    * MUST never throw — always returns a MonitorResult.
+    *
+    * @param request HTTP request descriptor
+    * @return transport result; never null
+    */
+   MonitorResult execute(MonitorRequest request);
 
-    /**
-     * Releases the transport's resources.
-     * MUST be idempotent.
-     *
-     * @param timeout maximum time for graceful shutdown
-     */
-    void close(Duration timeout);
+   /**
+    * Releases the transport's resources.
+    * MUST be idempotent.
+    *
+    * @param timeout maximum time for graceful shutdown
+    */
+   void close(Duration timeout);
 
 }
 ```
@@ -482,11 +482,11 @@ public interface MonitorTransport {
 ```java
 public class MonitorRequest {
 
-    String serviceName;           // identifies the target service (lookup key for the transport)
-    HttpMethod method;
-    URI url;                      // relative URI (path + query); MUST start with '/'
-    Map<String, List<String>> headers;
-    String body;
+   String serviceName;           // identifies the target service (lookup key for the transport)
+   HttpMethod method;
+   URI url;                      // relative URI (path + query); MUST start with '/'
+   Map<String, List<String>> headers;
+   String body;
 
 }
 ```
@@ -495,11 +495,11 @@ public class MonitorRequest {
 
 ```java
 public enum TransportStatus {
-    RESPONSE_RECEIVED,   // HTTP response received (any status code)
-    TIMEOUT,             // response timeout elapsed
-    CONNECT_ERROR,       // could not establish a connection
-    IO_ERROR,            // IO error during communication
-    POOL_EXHAUSTED       // connection pool exhausted; internal transport problem
+   RESPONSE_RECEIVED,   // HTTP response received (any status code)
+   TIMEOUT,             // response timeout elapsed
+   CONNECT_ERROR,       // could not establish a connection
+   IO_ERROR,            // IO error during communication
+   POOL_EXHAUSTED       // connection pool exhausted; internal transport problem
 }
 ```
 
@@ -510,16 +510,16 @@ The semantics are normative for all transport implementations — see Appendix A
 ```java
 public class MonitorResult {
 
-    TransportStatus transportStatus;
+   TransportStatus transportStatus;
 
-    int httpStatus;              // 0 if transportStatus != RESPONSE_RECEIVED
-    String responseBody;         // empty string if transportStatus != RESPONSE_RECEIVED
-    Map<String, List<String>> headers; // empty map if transportStatus != RESPONSE_RECEIVED
+   int httpStatus;              // 0 if transportStatus != RESPONSE_RECEIVED
+   String responseBody;         // empty string if transportStatus != RESPONSE_RECEIVED
+   Map<String, List<String>> headers; // empty map if transportStatus != RESPONSE_RECEIVED
 
-    String errorMessage;         // non-null when transportStatus != RESPONSE_RECEIVED;
-    // MUST distinguish the specific error type
+   String errorMessage;         // non-null when transportStatus != RESPONSE_RECEIVED;
+   // MUST distinguish the specific error type
 
-    Duration transportDuration;  // duration of the last HTTP attempt
+   Duration transportDuration;  // duration of the last HTTP attempt
 
 }
 ```
@@ -535,9 +535,9 @@ Contract: `execute()` MUST always return a `MonitorResult` — it MUST never thr
 ```java
 public interface Validator {
 
-    String alias();
+   String alias();
 
-    ValidationResult validate(MonitorResult result, Map<String, String> params);
+   ValidationResult validate(MonitorResult result, Map<String, String> params);
 
 }
 ```
@@ -547,8 +547,8 @@ public interface Validator {
 ```java
 public class ValidationResult {
 
-    ValidationVerdict verdict;  // PASS, WARN, FAIL
-    String message;             // diagnostic; MAY be null for PASS
+   ValidationVerdict verdict;  // PASS, WARN, FAIL
+   String message;             // diagnostic; MAY be null for PASS
 
 }
 ```
@@ -577,16 +577,16 @@ Aggregate result: at least one FAIL → FAIL; at least one WARN (no FAIL) → WA
 ```java
 public class MonitorExecutionResult {
 
-    String checkName;
-    String serviceName;
-    Instant startedAt;
-    Instant finishedAt;
-    Duration executionDuration;     // finishedAt - startedAt
-    int attempts;
-    String requestId;               // UUID v4
-    MonitorStatus status;           // UP, DOWN, WARN, ERROR
-    String message;                 // first FAIL message; else first WARN; else null
-    MonitorResult transport;
+   String checkName;
+   String serviceName;
+   Instant startedAt;
+   Instant finishedAt;
+   Duration executionDuration;     // finishedAt - startedAt
+   int attempts;
+   String requestId;               // UUID v4
+   MonitorStatus status;           // UP, DOWN, WARN, ERROR
+   String message;                 // first FAIL message; else first WARN; else null
+   MonitorResult transport;
 
 }
 ```
@@ -596,7 +596,7 @@ public class MonitorExecutionResult {
 ```java
 public interface MonitorResultListener {
 
-    void onResult(MonitorExecutionResult result);
+   void onResult(MonitorExecutionResult result);
 
 }
 ```
@@ -640,7 +640,32 @@ the [FreeMarker manual](https://freemarker.apache.org/docs/index.html).
 Template files MUST be UTF-8 (strict). Invalid UTF-8 → the check run terminates with `MonitorStatus.ERROR` and
 `TemplateNotFoundException` in the message.
 
-### 2.9.4 Render errors
+### 2.9.4 Environment passthrough variables
+
+Keys listed in `monitor.templateEnv.vars` (comma-separated) are read from the **full** configuration graph — including
+keys outside the `monitor.*` namespace and values pulled in via `##include` from other `.param` files — and injected
+into every template's FreeMarker model under their own names.
+
+```properties
+##include env.param           # env.param: _MODE = DEV
+monitor.templateEnv.vars=_MODE
+```
+
+```xml
+
+<ws:Request Mode="${_MODE}"/>
+```
+
+Precedence (lowest to highest): `templateEnv` vars → `monitor.default.param.*` → `monitor.check.<check>.param.*`.
+A `param.*` key overrides a `templateEnv` var of the same name.
+
+A name listed in `monitor.templateEnv.vars` that resolves to no property at all → initialization MUST fail. A name that
+resolves to a blank value is treated as absent (the template MAY supply a default via `${name!'...'}`).
+
+Variable names MUST be legal FreeMarker identifiers (letters, digits, underscore; not starting with a digit). Names
+containing `.` or `-` are rejected at initialization.
+
+### 2.9.5 Render errors
 
 Render failures from `TemplateRenderer` (undefined variable, FreeMarker syntax error, type mismatch, etc.) → the check
 run terminates with `MonitorStatus.ERROR` and `TemplateRenderException` in the message. The error message includes the
@@ -736,6 +761,12 @@ See Appendix B for keys supported by the default `WireClientTransport`.
 |------------------------------------|----------|---------|--------------------------|
 | `monitor.executor.shutdownTimeout` | Duration | `30s`   | grace period at shutdown |
 
+### 2.11.5 Template environment parameters
+
+| parameter                  | type | required | description                                                                             |
+|----------------------------|------|----------|-----------------------------------------------------------------------------------------|
+| `monitor.templateEnv.vars` | List | no       | comma-separated names of properties (from any `.param` file) to expose to all templates |
+
 ---
 
 ## 2.12 Complete configuration example
@@ -813,10 +844,10 @@ monitor.executor.shutdownTimeout=30s
 ```xml
 
 <healthCheck>
-    <clientId>${clientId}</clientId>
-    <region>${region}</region>
-    <requestId>${statics['java.util.UUID'].randomUUID()}</requestId>
-    <timestamp>${.now?iso_utc}</timestamp>
+   <clientId>${clientId}</clientId>
+   <region>${region}</region>
+   <requestId>${statics['java.util.UUID'].randomUUID()}</requestId>
+   <timestamp>${.now?iso_utc}</timestamp>
 </healthCheck>
 ```
 
@@ -880,24 +911,24 @@ without any network communication:
 ```java
 public class StubTransport implements MonitorTransport {
 
-    private final Map<String, MonitorResult> responses = new ConcurrentHashMap<>();
+   private final Map<String, MonitorResult> responses = new ConcurrentHashMap<>();
 
-    public void stub(String serviceName, MonitorResult result) {
-        responses.put(serviceName, result);
-    }
+   public void stub(String serviceName, MonitorResult result) {
+      responses.put(serviceName, result);
+   }
 
-    @Override
-    public void init(List<ServiceConfig> services) {
-    }
+   @Override
+   public void init(List<ServiceConfig> services) {
+   }
 
-    @Override
-    public MonitorResult execute(MonitorRequest request) {
-        return responses.getOrDefault(request.getServiceName(), defaultOk());
-    }
+   @Override
+   public MonitorResult execute(MonitorRequest request) {
+      return responses.getOrDefault(request.getServiceName(), defaultOk());
+   }
 
-    @Override
-    public void close(Duration timeout) {
-    }
+   @Override
+   public void close(Duration timeout) {
+   }
 
 }
 ```
