@@ -233,15 +233,15 @@ public class CheckConfig {
 ```java
 public class ServiceConfig {
 
-   String serviceName;
+    String serviceName;
 
-   URI url;                    // service base URL; format depends on transport implementation
+    URI url;                    // service base URL; format depends on transport implementation
 
-   Duration interval;
+    Duration interval;
 
-   Map<String, String> headers;
+    Map<String, String> headers;
 
-   Map<String, String> transportProperties;  // opaque bag passed to the transport implementation
+    Map<String, String> transportProperties;  // opaque bag passed to the transport implementation
 
 }
 ```
@@ -260,9 +260,9 @@ implementation is responsible for validation in `init()`. Example:
 ```java
 public interface MonitorConfigProvider {
 
-   List<CheckConfig> getChecks();
+    List<CheckConfig> getChecks();
 
-   List<ServiceConfig> getServices();
+    List<ServiceConfig> getServices();
 
 }
 ```
@@ -446,33 +446,33 @@ resources.
 ```java
 public interface MonitorTransport {
 
-   /**
-    * Initializes the transport with service configuration.
-    * Called once at monitor startup, before the first execute().
-    *
-    * @param services list of service configurations
-    * @throws IllegalStateException    if the transport is already initialized
-    * @throws IllegalArgumentException if the configuration is invalid
-    */
-   void init(List<ServiceConfig> services);
+    /**
+     * Initializes the transport with service configuration.
+     * Called once at monitor startup, before the first execute().
+     *
+     * @param services list of service configurations
+     * @throws IllegalStateException    if the transport is already initialized
+     * @throws IllegalArgumentException if the configuration is invalid
+     */
+    void init(List<ServiceConfig> services);
 
-   /**
-    * Executes a single HTTP request synchronously.
-    * Called on the check run's virtual thread.
-    * MUST never throw — always returns a MonitorResult.
-    *
-    * @param request HTTP request descriptor
-    * @return transport result; never null
-    */
-   MonitorResult execute(MonitorRequest request);
+    /**
+     * Executes a single HTTP request synchronously.
+     * Called on the check run's virtual thread.
+     * MUST never throw — always returns a MonitorResult.
+     *
+     * @param request HTTP request descriptor
+     * @return transport result; never null
+     */
+    MonitorResult execute(MonitorRequest request);
 
-   /**
-    * Releases the transport's resources.
-    * MUST be idempotent.
-    *
-    * @param timeout maximum time for graceful shutdown
-    */
-   void close(Duration timeout);
+    /**
+     * Releases the transport's resources.
+     * MUST be idempotent.
+     *
+     * @param timeout maximum time for graceful shutdown
+     */
+    void close(Duration timeout);
 
 }
 ```
@@ -482,11 +482,11 @@ public interface MonitorTransport {
 ```java
 public class MonitorRequest {
 
-   String serviceName;           // identifies the target service (lookup key for the transport)
-   HttpMethod method;
-   URI url;                      // relative URI (path + query); MUST start with '/'
-   Map<String, List<String>> headers;
-   String body;
+    String serviceName;           // identifies the target service (lookup key for the transport)
+    HttpMethod method;
+    URI url;                      // relative URI (path + query); MUST start with '/'
+    Map<String, List<String>> headers;
+    String body;
 
 }
 ```
@@ -495,11 +495,11 @@ public class MonitorRequest {
 
 ```java
 public enum TransportStatus {
-   RESPONSE_RECEIVED,   // HTTP response received (any status code)
-   TIMEOUT,             // response timeout elapsed
-   CONNECT_ERROR,       // could not establish a connection
-   IO_ERROR,            // IO error during communication
-   POOL_EXHAUSTED       // connection pool exhausted; internal transport problem
+    RESPONSE_RECEIVED,   // HTTP response received (any status code)
+    TIMEOUT,             // response timeout elapsed
+    CONNECT_ERROR,       // could not establish a connection
+    IO_ERROR,            // IO error during communication
+    POOL_EXHAUSTED       // connection pool exhausted; internal transport problem
 }
 ```
 
@@ -510,16 +510,16 @@ The semantics are normative for all transport implementations — see Appendix A
 ```java
 public class MonitorResult {
 
-   TransportStatus transportStatus;
+    TransportStatus transportStatus;
 
-   int httpStatus;              // 0 if transportStatus != RESPONSE_RECEIVED
-   String responseBody;         // empty string if transportStatus != RESPONSE_RECEIVED
-   Map<String, List<String>> headers; // empty map if transportStatus != RESPONSE_RECEIVED
+    int httpStatus;              // 0 if transportStatus != RESPONSE_RECEIVED
+    String responseBody;         // empty string if transportStatus != RESPONSE_RECEIVED
+    Map<String, List<String>> headers; // empty map if transportStatus != RESPONSE_RECEIVED
 
-   String errorMessage;         // non-null when transportStatus != RESPONSE_RECEIVED;
-   // MUST distinguish the specific error type
+    String errorMessage;         // non-null when transportStatus != RESPONSE_RECEIVED;
+    // MUST distinguish the specific error type
 
-   Duration transportDuration;  // duration of the last HTTP attempt
+    Duration transportDuration;  // duration of the last HTTP attempt
 
 }
 ```
@@ -535,9 +535,9 @@ Contract: `execute()` MUST always return a `MonitorResult` — it MUST never thr
 ```java
 public interface Validator {
 
-   String alias();
+    String alias();
 
-   ValidationResult validate(MonitorResult result, Map<String, String> params);
+    ValidationResult validate(MonitorResult result, Map<String, String> params);
 
 }
 ```
@@ -547,8 +547,8 @@ public interface Validator {
 ```java
 public class ValidationResult {
 
-   ValidationVerdict verdict;  // PASS, WARN, FAIL
-   String message;             // diagnostic; MAY be null for PASS
+    ValidationVerdict verdict;  // PASS, WARN, FAIL
+    String message;             // diagnostic; MAY be null for PASS
 
 }
 ```
@@ -577,16 +577,16 @@ Aggregate result: at least one FAIL → FAIL; at least one WARN (no FAIL) → WA
 ```java
 public class MonitorExecutionResult {
 
-   String checkName;
-   String serviceName;
-   Instant startedAt;
-   Instant finishedAt;
-   Duration executionDuration;     // finishedAt - startedAt
-   int attempts;
-   String requestId;               // UUID v4
-   MonitorStatus status;           // UP, DOWN, WARN, ERROR
-   String message;                 // first FAIL message; else first WARN; else null
-   MonitorResult transport;
+    String checkName;
+    String serviceName;
+    Instant startedAt;
+    Instant finishedAt;
+    Duration executionDuration;     // finishedAt - startedAt
+    int attempts;
+    String requestId;               // UUID v4
+    MonitorStatus status;           // UP, DOWN, WARN, ERROR
+    String message;                 // first FAIL message; else first WARN; else null
+    MonitorResult transport;
 
 }
 ```
@@ -596,7 +596,7 @@ public class MonitorExecutionResult {
 ```java
 public interface MonitorResultListener {
 
-   void onResult(MonitorExecutionResult result);
+    void onResult(MonitorExecutionResult result);
 
 }
 ```
@@ -622,6 +622,10 @@ Merging is case-sensitive (FreeMarker variable names are case-sensitive).
 The merged map is passed to the template engine as Map<String, Object>.
 Inside the template, values are addressable as ${name}.
 
+A third, lowest-precedence layer — environment passthrough variables auto-scanned from the full configuration graph —
+is also merged in; see §2.9.4. Full precedence: scanned environment variables → `monitor.default.param.*` →
+`monitor.check.<check>.param.*`.
+
 ### 2.9.2 Dynamic values (FreeMarker built-ins)
 
 | purpose                                    | syntax                                      |
@@ -642,28 +646,45 @@ Template files MUST be UTF-8 (strict). Invalid UTF-8 → the check run terminate
 
 ### 2.9.4 Environment passthrough variables
 
-Keys listed in `monitor.templateEnv.vars` (comma-separated) are read from the **full** configuration graph — including
-keys outside the `monitor.*` namespace and values pulled in via `##include` from other `.param` files — and injected
-into every template's FreeMarker model under their own names.
+Configuration keys that live **outside** the framework namespaces are automatically exposed to every template as bare
+FreeMarker variables — no per-variable or per-check declaration is required.
+
+A key is exposed when **both** hold:
+
+- it is **not** under `monitor.*` or `bedrock.wire.monitor.*` (those are framework configuration, never template
+  variables); and
+- it is a **legal bare FreeMarker identifier** — it matches `^[A-Za-z_][A-Za-z0-9_]*$`.
+
+Such keys are read from the **full** configuration graph — including keys pulled in via `##include` from other `.param`
+files — and injected into every template's model under their own names. Because the graph is a resolved
+`PropertiesCfg`, `${...}` chains and `env.`/`sys.` builtins are already applied before the scan.
 
 ```properties
 ##include env.param           # env.param: _MODE = DEV
-monitor.templateEnv.vars=_MODE
 ```
-
 ```xml
-
 <ws:Request Mode="${_MODE}"/>
 ```
 
-Precedence (lowest to highest): `templateEnv` vars → `monitor.default.param.*` → `monitor.check.<check>.param.*`.
-A `param.*` key overrides a `templateEnv` var of the same name.
+`Mode="DEV"` renders — with no `monitor.*.param._MODE` and no list declaration anywhere.
 
-A name listed in `monitor.templateEnv.vars` that resolves to no property at all → initialization MUST fail. A name that
-resolves to a blank value is treated as absent (the template MAY supply a default via `${name!'...'}`).
+**Dotted and namespaced keys are skipped silently.** FreeMarker reads `${a.b}` as hash access, so a flat dotted key
+(`some.app.setting`) is unreachable as a bare variable and is excluded; a configuration file legitimately contains many
+such keys that were never intended as template variables. Skipping is not an error.
 
-Variable names MUST be legal FreeMarker identifiers (letters, digits, underscore; not starting with a digit). Names
-containing `.` or `-` are rejected at initialization.
+**Blank values are treated as absent.** A key whose resolved value is blank is omitted from the model, so the template
+MAY supply a default via `${name!'...'}`.
+
+**Precedence** (lowest to highest): scanned environment variables → `monitor.default.param.*` →
+`monitor.check.<check>.param.*`. A `param.*` key overrides a scanned variable of the same name.
+
+There is **no startup validation** of template variable usage: with no declaration list, there is nothing to declare
+incorrectly. A template that references an undefined or misspelled variable (`${_MOED}`) fails at **render time** with
+`TemplateRenderException` (see §2.9.5), not at initialization.
+
+> The scan is performed by `TemplateVarScanner` in `bedrock-wire-template`; see that module's README. Standalone users
+> of `bedrock-wire-template` (no monitor) can call `TemplateVarScanner.scan(properties)` directly and pass the result to
+> `Params.of(...)`.
 
 ### 2.9.5 Render errors
 
@@ -761,12 +782,6 @@ See Appendix B for keys supported by the default `WireClientTransport`.
 |------------------------------------|----------|---------|--------------------------|
 | `monitor.executor.shutdownTimeout` | Duration | `30s`   | grace period at shutdown |
 
-### 2.11.5 Template environment parameters
-
-| parameter                  | type | required | description                                                                             |
-|----------------------------|------|----------|-----------------------------------------------------------------------------------------|
-| `monitor.templateEnv.vars` | List | no       | comma-separated names of properties (from any `.param` file) to expose to all templates |
-
 ---
 
 ## 2.12 Complete configuration example
@@ -844,10 +859,10 @@ monitor.executor.shutdownTimeout=30s
 ```xml
 
 <healthCheck>
-   <clientId>${clientId}</clientId>
-   <region>${region}</region>
-   <requestId>${statics['java.util.UUID'].randomUUID()}</requestId>
-   <timestamp>${.now?iso_utc}</timestamp>
+    <clientId>${clientId}</clientId>
+    <region>${region}</region>
+    <requestId>${statics['java.util.UUID'].randomUUID()}</requestId>
+    <timestamp>${.now?iso_utc}</timestamp>
 </healthCheck>
 ```
 

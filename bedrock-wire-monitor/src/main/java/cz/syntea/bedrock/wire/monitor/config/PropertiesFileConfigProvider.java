@@ -1,6 +1,7 @@
 package cz.syntea.bedrock.wire.monitor.config;
 
 import cz.syntea.bedrock.wire.monitor.model.HttpMethod;
+import cz.syntea.bedrock.wire.template.source.TemplateVarScanner;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -62,15 +63,11 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
             "^(\\d+)(ms|s|m|h)$"
     );
 
-    private static final Pattern TEMPLATE_ENV_NAME_PATTERN = Pattern.compile(
-            "^[A-Za-z_][A-Za-z0-9_]*$"
-    );
-
     private final List<CheckConfig> checks;
     private final List<ServiceConfig> services;
     private final List<TlsProfileConfig> tlsProfiles;
     private final Duration shutdownTimeout;
-    private final Map<String, String> templateEnv;
+    private final Map<String, Object> templateEnv;
 
     /**
      * Creates a new provider by parsing the given properties file.
@@ -113,9 +110,11 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
         Map<String, String> monitorProps = extractMonitorProperties(props);
 
-        // Resolve monitor.templateEnv.vars against the FULL graph (props), before
-        // extractMonitorProperties' monitor.-only view discards non-monitor. keys.
-        this.templateEnv = extractTemplateEnv(props, monitorProps);
+        // Environment-passthrough variables: every legal bare-identifier key in the
+        // full configuration graph that is NOT under a framework namespace is exposed
+        // to all templates. Scanned from the raw props (a resolved PropertiesCfg), so
+        // ${...} chains and env./sys. builtins are already applied. See spec §2.9.4.
+        this.templateEnv = TemplateVarScanner.scan(props);
 
         Map<String, String> defaults = extractByPrefix(monitorProps, "default.");
         Map<String, Map<String, String>> serviceRawMap = extractGrouped(monitorProps, "service.");
@@ -302,13 +301,15 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     }
 
     /**
-     * Returns the monitor-global template environment variables resolved from
-     * {@code monitor.templateEnv.vars}. These are merged into every check's
-     * {@code templateParams} as the lowest-precedence layer.
+     * Returns the environment-passthrough variables scanned from the full
+     * configuration graph (spec §2.9.4): every legal bare-identifier key outside
+     * the {@code monitor.*} and {@code bedrock.wire.monitor.*} namespaces. These
+     * are merged into every check's {@code templateParams} as the lowest-precedence
+     * layer.
      *
      * @return immutable map of environment variables; never {@code null}, may be empty
      */
-    public Map<String, String> getTemplateEnv() {
+    public Map<String, Object> getTemplateEnv() {
         return templateEnv;
     }
 
@@ -338,59 +339,6 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
             }
         }
         return result;
-    }
-
-    /**
-     * Resolves the {@code monitor.templateEnv.vars} list against the full
-     * configuration graph and collects the named properties into an immutable
-     * map for injection into every check's template model.
-     *
-     * <p>Names are looked up via {@link Properties#getProperty(String)} on the
-     * raw {@code rawProps} — for a {@code PropertiesCfg} this means {@code ${...}}
-     * chains and {@code env.}/{@code sys.} builtins are already resolved.
-     *
-     * <p>Rules:
-     * <ul>
-     *   <li>A name that is not a legal FreeMarker identifier (letters, digits,
-     *       underscore; not starting with a digit) is rejected.</li>
-     *   <li>A name that resolves to no property at all causes a fail-fast error
-     *       — a declared-but-undefined env var is almost always a mistake.</li>
-     *   <li>A name that resolves to a blank value is treated as absent, so the
-     *       template MAY supply a default via {@code ${name!'...'}}.</li>
-     * </ul>
-     *
-     * @param rawProps     the full (un-stripped) properties graph; must not be {@code null}
-     * @param monitorProps the {@code monitor.}-stripped view, used to read the vars list
-     * @return immutable map of resolved environment variables; never {@code null}, may be empty
-     * @throws IllegalArgumentException if a listed name is illegal or undefined
-     */
-    private Map<String, String> extractTemplateEnv(Properties rawProps, Map<String, String> monitorProps) {
-        String varsCsv = monitorProps.get("templateEnv.vars");
-        if (varsCsv == null || varsCsv.isBlank()) {
-            return Map.of();
-        }
-        Map<String, String> result = new LinkedHashMap<>();
-        for (String rawName : varsCsv.split(",")) {
-            String name = rawName.trim();
-            if (name.isEmpty()) {
-                continue;
-            }
-            if (!TEMPLATE_ENV_NAME_PATTERN.matcher(name).matches()) {
-                throw new IllegalArgumentException(
-                        "monitor.templateEnv.vars contains illegal variable name '" + name
-                                + "'. Names must be legal FreeMarker identifiers "
-                                + "(letters, digits, underscore; not starting with a digit).");
-            }
-            String value = rawProps.getProperty(name);
-            if (value == null) {
-                throw new IllegalArgumentException(
-                        "monitor.templateEnv.vars references undefined property '" + name + "'");
-            }
-            if (!value.isBlank()) {
-                result.put(name, value.trim());
-            }
-        }
-        return Map.copyOf(result);
     }
 
     /**
@@ -426,6 +374,29 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         for (Map.Entry<String, String> e : source.entrySet()) {
             if (e.getValue() != null && !e.getValue().isBlank()) {
                 target.put(e.getKey(), e.getValue());
+            }
+        }
+    }
+
+    /**
+     * Copies entries from an {@code Object}-valued {@code source} into a
+     * {@code String}-valued {@code target}, skipping entries whose value is
+     * {@code null} or (after {@code toString()}) blank.
+     *
+     * <p>Used to merge the scanned {@code templateEnv} layer (typed
+     * {@code Map<String, Object>} to match the template engine's model type) into
+     * the {@code String}-valued {@code templateParams} map. In practice
+     * {@link TemplateVarScanner} only ever emits trimmed, non-blank {@code String}
+     * values, so this is a straightforward copy.
+     *
+     * @param target the {@code String}-valued map to copy non-blank entries into
+     * @param source the {@code Object}-valued map to read entries from
+     */
+    private void putNonBlankObjects(Map<String, String> target, Map<String, Object> source) {
+        for (Map.Entry<String, Object> e : source.entrySet()) {
+            Object value = e.getValue();
+            if (value != null && !value.toString().isBlank()) {
+                target.put(e.getKey(), value.toString());
             }
         }
     }
@@ -505,7 +476,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
             Map<String, Map<String, String>> checkRawMap,
             Map<String, ServiceConfig> serviceIndex,
             Map<String, String> defaults,
-            Map<String, String> templateEnv,
+            Map<String, Object> templateEnv,
             Set<String> validatorAliases) {
 
         List<CheckConfig> result = new ArrayList<>();
@@ -587,11 +558,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
             }
 
             // Template params: merge templateEnv → default param.* → check param.*.
-            // templateEnv is the lowest-precedence layer (a param.* key of the same
-            // name overrides it). Blank values are treated as absent so an unresolved
-            // ${...} placeholder does not shadow a higher-precedence value.
+            // templateEnv (scanned environment-passthrough vars, spec §2.9.4) is the
+            // lowest-precedence layer — a param.* key of the same name overrides it.
+            // Blank values are treated as absent so an unresolved ${...} placeholder
+            // does not shadow a higher-precedence value.
             Map<String, String> templateParams = new LinkedHashMap<>();
-            putNonBlank(templateParams, templateEnv);
+            putNonBlankObjects(templateParams, templateEnv);
             putNonBlank(templateParams, extractByPrefix(defaults, "param."));
             putNonBlank(templateParams, extractByPrefix(raw, "param."));
 
@@ -610,7 +582,6 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
                     .validators(List.copyOf(validatorList))
                     .validationParams(Map.copyOf(validationParams))
                     .templateParams(Map.copyOf(templateParams))
-                    .templateEnv(templateEnv)
                     .build());
         }
         return List.copyOf(result);
