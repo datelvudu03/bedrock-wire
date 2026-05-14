@@ -12,8 +12,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -246,9 +249,125 @@ class PropertiesFileConfigProviderTest {
                 PropertiesFileConfigProvider.parseDuration("", "test"));
     }
 
+    // ── Environment passthrough (auto-scanned, spec §2.9.4) ─────────────────
+
+    @Test
+    void shouldExposeScannedEnvVar() throws IOException {
+        Path file = writeConfig(tempDir,
+                "_MODE = DEV\n"
+                        + "monitor.service.svc.url = https://a.com\n"
+                        + "monitor.check.c.service = svc\n"
+                        + "monitor.check.c.interval = 5s\n"
+        );
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+
+        // No monitor.templateEnv.vars declaration — _MODE is auto-exposed.
+        assertEquals("DEV", provider.getTemplateEnv().get("_MODE"));
+        assertEquals("DEV", provider.getChecks().get(0).getTemplateParams().get("_MODE"));
+    }
+
+    @Test
+    void shouldExcludeFrameworkNamespacesFromEnv() throws IOException {
+        Path file = writeConfig(tempDir,
+                "_MODE = DEV\n"
+                        + "bedrock.wire.monitor.enabled = true\n"
+                        + "monitor.service.svc.url = https://a.com\n"
+                        + "monitor.check.c.service = svc\n"
+                        + "monitor.check.c.interval = 5s\n"
+        );
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+
+        assertTrue(provider.getTemplateEnv().containsKey("_MODE"));
+        assertFalse(provider.getTemplateEnv().containsKey("bedrock.wire.monitor.enabled"));
+        assertFalse(provider.getTemplateEnv().containsKey("monitor.service.svc.url"));
+    }
+
+    @Test
+    void shouldSkipDottedKeysInEnv() throws IOException {
+        Path file = writeConfig(tempDir,
+                "_MODE = DEV\n"
+                        + "some.app.setting = X\n"
+                        + "monitor.service.svc.url = https://a.com\n"
+                        + "monitor.check.c.service = svc\n"
+                        + "monitor.check.c.interval = 5s\n"
+        );
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+
+        assertTrue(provider.getTemplateEnv().containsKey("_MODE"));
+        assertFalse(provider.getTemplateEnv().containsKey("some.app.setting"));
+    }
+
+    @Test
+    void shouldResolveChainedEnvVar() {
+        // ResolvingProperties simulates PropertiesCfg: getProperty() resolves ${...}.
+        Properties props = new ResolvingProperties();
+        props.setProperty("_RAW", "DEV");
+        props.setProperty("_MODE", "${_RAW}");
+        props.setProperty("monitor.service.svc.url", "https://a.com");
+        props.setProperty("monitor.check.c.service", "svc");
+        props.setProperty("monitor.check.c.interval", "5s");
+
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(props, validAliases);
+
+        assertEquals("DEV", provider.getChecks().get(0).getTemplateParams().get("_MODE"));
+    }
+
+    @Test
+    void shouldLetCheckParamOverrideScannedEnvVar() throws IOException {
+        Path file = writeConfig(tempDir,
+                "_MODE = DEV\n"
+                        + "monitor.service.svc.url = https://a.com\n"
+                        + "monitor.check.c.service = svc\n"
+                        + "monitor.check.c.interval = 5s\n"
+                        + "monitor.check.c.param._MODE = PROD\n"
+        );
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+
+        // param.* wins; the scanned env layer is lowest precedence.
+        assertEquals("PROD", provider.getChecks().get(0).getTemplateParams().get("_MODE"));
+        assertEquals("DEV", provider.getTemplateEnv().get("_MODE"));
+    }
+
+    @Test
+    void shouldTreatBlankEnvVarAsAbsent() throws IOException {
+        Path file = writeConfig(tempDir,
+                "_MODE =\n"
+                        + "monitor.service.svc.url = https://a.com\n"
+                        + "monitor.check.c.service = svc\n"
+                        + "monitor.check.c.interval = 5s\n"
+        );
+        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+
+        assertFalse(provider.getTemplateEnv().containsKey("_MODE"));
+        assertFalse(provider.getChecks().get(0).getTemplateParams().containsKey("_MODE"));
+    }
+
     private Path writeConfig(Path dir, String content) throws IOException {
         Path file = dir.resolve("test.properties");
         Files.writeString(file, content);
         return file;
+    }
+
+    /**
+     * Minimal {@link Properties} subclass that resolves {@code ${name}} references
+     * on read, simulating {@code PropertiesCfg} for tests without depending on
+     * {@code syntea-bedrock-cfg}.
+     */
+    private static final class ResolvingProperties extends Properties {
+        @Override
+        public String getProperty(String key) {
+            String value = super.getProperty(key);
+            if (value == null) {
+                return null;
+            }
+            Matcher m = Pattern.compile("\\$\\{([^}]+)}").matcher(value);
+            StringBuilder sb = new StringBuilder();
+            while (m.find()) {
+                String ref = getProperty(m.group(1));
+                m.appendReplacement(sb, Matcher.quoteReplacement(ref != null ? ref : ""));
+            }
+            m.appendTail(sb);
+            return sb.toString();
+        }
     }
 }

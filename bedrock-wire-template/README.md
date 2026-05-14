@@ -58,6 +58,38 @@ Params params = Params.combined(
 );
 ```
 
+## Scanning a `.param` graph — `TemplateVarScanner`
+
+`TemplateVarScanner` turns a configuration graph (any `Properties` — typically a
+`PropertiesCfg` with `${...}` chains already resolved) into a flat model map of
+template-visible variables. A key is exposed when it is a legal bare FreeMarker
+identifier (`^[A-Za-z_][A-Za-z0-9_]*$`) and is **not** under `monitor.*` or
+`bedrock.wire.monitor.*`. Dotted keys and blank values are skipped silently.
+
+Scan once at startup, reuse across every render:
+
+```java
+PropertiesCfg cfg = PropertiesCfg.load(Path.of("app.param"));
+Map<String, Object> vars = TemplateVarScanner.scan(cfg);     // scan ONCE
+TemplateRenderer renderer = TemplateRenderer.create();
+
+String reqA = renderer.render(Path.of("ckp-request.xml"), Params.of(vars));
+String reqB = renderer.render(Path.of("ping.xml"), Params.of(vars));
+```
+
+Layer it under per-template params with `Params.combined` (scanned vars lowest
+precedence):
+
+```java
+String req = renderer.render(
+        Path.of("ckp-request.xml"),
+        Params.combined(Params.of(vars), Params.of(Map.of("clientId", "monitor-prod"))));
+```
+
+`bedrock-wire-monitor` uses this internally — every key in your `.param` files
+(outside the framework namespaces) is auto-exposed to monitor templates with no
+declaration. See the monitor spec §2.9.4.
+
 ## Common SOAP/XML patterns
 
 | Pattern            | FreeMarker                                                           |

@@ -212,20 +212,20 @@ may have only one value.
 ```java
 public class CheckConfig {
 
-    String checkName;
-    String serviceName;
+   String checkName;
+   String serviceName;
 
-    HttpMethod method;
-    String path;
-    String query;
-    String templateFile;
+   HttpMethod method;
+   String path;
+   String query;
+   String templateFile;
 
-    int retryCount;
-    Duration retryDelay;
+   int retryCount;
+   Duration retryDelay;
 
-    Map<String, String> headers;
-    List<String> validators;
-    Map<String, String> validationParams; // keys without the "validation." prefix
+   Map<String, String> headers;
+   List<String> validators;
+   Map<String, String> validationParams; // keys without the "validation." prefix
 
 }
 ```
@@ -622,6 +622,10 @@ Merging is case-sensitive (FreeMarker variable names are case-sensitive).
 The merged map is passed to the template engine as Map<String, Object>.
 Inside the template, values are addressable as ${name}.
 
+A third, lowest-precedence layer — environment passthrough variables auto-scanned from the full configuration graph —
+is also merged in; see §2.9.4. Full precedence: scanned environment variables → `monitor.default.param.*` →
+`monitor.check.<check>.param.*`.
+
 ### 2.9.2 Dynamic values (FreeMarker built-ins)
 
 | purpose                                    | syntax                                      |
@@ -640,7 +644,49 @@ the [FreeMarker manual](https://freemarker.apache.org/docs/index.html).
 Template files MUST be UTF-8 (strict). Invalid UTF-8 → the check run terminates with `MonitorStatus.ERROR` and
 `TemplateNotFoundException` in the message.
 
-### 2.9.4 Render errors
+### 2.9.4 Environment passthrough variables
+
+Configuration keys that live **outside** the framework namespaces are automatically exposed to every template as bare
+FreeMarker variables — no per-variable or per-check declaration is required.
+
+A key is exposed when **both** hold:
+
+- it is **not** under `monitor.*` or `bedrock.wire.monitor.*` (those are framework configuration, never template
+  variables); and
+- it is a **legal bare FreeMarker identifier** — it matches `^[A-Za-z_][A-Za-z0-9_]*$`.
+
+Such keys are read from the **full** configuration graph — including keys pulled in via `##include` from other `.param`
+files — and injected into every template's model under their own names. Because the graph is a resolved
+`PropertiesCfg`, `${...}` chains and `env.`/`sys.` builtins are already applied before the scan.
+
+```properties
+##include env.param           # env.param: _MODE = DEV
+```
+```xml
+<ws:Request Mode="${_MODE}"/>
+```
+
+`Mode="DEV"` renders — with no `monitor.*.param._MODE` and no list declaration anywhere.
+
+**Dotted and namespaced keys are skipped silently.** FreeMarker reads `${a.b}` as hash access, so a flat dotted key
+(`some.app.setting`) is unreachable as a bare variable and is excluded; a configuration file legitimately contains many
+such keys that were never intended as template variables. Skipping is not an error.
+
+**Blank values are treated as absent.** A key whose resolved value is blank is omitted from the model, so the template
+MAY supply a default via `${name!'...'}`.
+
+**Precedence** (lowest to highest): scanned environment variables → `monitor.default.param.*` →
+`monitor.check.<check>.param.*`. A `param.*` key overrides a scanned variable of the same name.
+
+There is **no startup validation** of template variable usage: with no declaration list, there is nothing to declare
+incorrectly. A template that references an undefined or misspelled variable (`${_MOED}`) fails at **render time** with
+`TemplateRenderException` (see §2.9.5), not at initialization.
+
+> The scan is performed by `TemplateVarScanner` in `bedrock-wire-template`; see that module's README. Standalone users
+> of `bedrock-wire-template` (no monitor) can call `TemplateVarScanner.scan(properties)` directly and pass the result to
+> `Params.of(...)`.
+
+### 2.9.5 Render errors
 
 Render failures from `TemplateRenderer` (undefined variable, FreeMarker syntax error, type mismatch, etc.) → the check
 run terminates with `MonitorStatus.ERROR` and `TemplateRenderException` in the message. The error message includes the
@@ -880,24 +926,24 @@ without any network communication:
 ```java
 public class StubTransport implements MonitorTransport {
 
-    private final Map<String, MonitorResult> responses = new ConcurrentHashMap<>();
+   private final Map<String, MonitorResult> responses = new ConcurrentHashMap<>();
 
-    public void stub(String serviceName, MonitorResult result) {
-        responses.put(serviceName, result);
-    }
+   public void stub(String serviceName, MonitorResult result) {
+      responses.put(serviceName, result);
+   }
 
-    @Override
-    public void init(List<ServiceConfig> services) {
-    }
+   @Override
+   public void init(List<ServiceConfig> services) {
+   }
 
-    @Override
-    public MonitorResult execute(MonitorRequest request) {
-        return responses.getOrDefault(request.getServiceName(), defaultOk());
-    }
+   @Override
+   public MonitorResult execute(MonitorRequest request) {
+      return responses.getOrDefault(request.getServiceName(), defaultOk());
+   }
 
-    @Override
-    public void close(Duration timeout) {
-    }
+   @Override
+   public void close(Duration timeout) {
+   }
 
 }
 ```

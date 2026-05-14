@@ -1,6 +1,7 @@
 package cz.syntea.bedrock.wire.monitor.config;
 
 import cz.syntea.bedrock.wire.monitor.model.HttpMethod;
+import cz.syntea.bedrock.wire.template.source.TemplateVarScanner;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -51,6 +52,8 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     private static final String TLS_PREFIX = PREFIX + "tls.";
     private static final String EXECUTOR_PREFIX = PREFIX + "executor.";
 
+    private static final String PARAM_RETRY_DELAY = "retry.delay";
+
     private static final Duration DEFAULT_RETRY_DELAY = Duration.ofSeconds(1);
     private static final Duration DEFAULT_SHUTDOWN_TIMEOUT = Duration.ofSeconds(30);
     private static final HttpMethod DEFAULT_METHOD = HttpMethod.POST;
@@ -64,6 +67,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     private final List<ServiceConfig> services;
     private final List<TlsProfileConfig> tlsProfiles;
     private final Duration shutdownTimeout;
+    private final Map<String, Object> templateEnv;
 
     /**
      * Creates a new provider by parsing the given properties file.
@@ -106,6 +110,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
         Map<String, String> monitorProps = extractMonitorProperties(props);
 
+        // Environment-passthrough variables: every legal bare-identifier key in the
+        // full configuration graph that is NOT under a framework namespace is exposed
+        // to all templates. Scanned from the raw props (a resolved PropertiesCfg), so
+        // ${...} chains and env./sys. builtins are already applied. See spec §2.9.4.
+        this.templateEnv = TemplateVarScanner.scan(props);
+
         Map<String, String> defaults = extractByPrefix(monitorProps, "default.");
         Map<String, Map<String, String>> serviceRawMap = extractGrouped(monitorProps, "service.");
         Map<String, Map<String, String>> checkRawMap = extractGrouped(monitorProps, "check.");
@@ -119,7 +129,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
             serviceIndex.put(sc.getServiceName(), sc);
         }
 
-        this.checks = parseChecks(checkRawMap, serviceIndex, defaults, validatorAliases);
+        this.checks = parseChecks(checkRawMap, serviceIndex, defaults, this.templateEnv, validatorAliases);
         validateCheckUniqueness(this.checks);
 
         this.tlsProfiles = parseTlsProfiles(tlsRawMap);
@@ -216,6 +226,9 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
     /**
      * Formats a {@link Duration} as a human-readable string (e.g. "30s", "500ms", "2m").
+     *
+     * @param duration the duration to format; may be {@code null}
+     * @return a human-readable representation, or {@code "null"} if {@code duration} is {@code null}
      */
     private static String formatDuration(Duration duration) {
         if (duration == null) {
@@ -287,6 +300,19 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         return shutdownTimeout;
     }
 
+    /**
+     * Returns the environment-passthrough variables scanned from the full
+     * configuration graph (spec §2.9.4): every legal bare-identifier key outside
+     * the {@code monitor.*} and {@code bedrock.wire.monitor.*} namespaces. These
+     * are merged into every check's {@code templateParams} as the lowest-precedence
+     * layer.
+     *
+     * @return immutable map of environment variables; never {@code null}, may be empty
+     */
+    public Map<String, Object> getTemplateEnv() {
+        return templateEnv;
+    }
+
     private static Properties loadProperties(Path path) {
         if (path == null) {
             throw new IllegalArgumentException("Config file path must not be null");
@@ -317,6 +343,10 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
     /**
      * Extracts all keys with a given prefix into a flat map (prefix stripped).
+     *
+     * @param props  the source map
+     * @param prefix the prefix to match and strip
+     * @return a new map containing the matching entries with the prefix removed
      */
     private Map<String, String> extractByPrefix(Map<String, String> props, String prefix) {
         Map<String, String> result = new LinkedHashMap<>();
@@ -328,11 +358,58 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
         return result;
     }
 
+    /**
+     * Copies entries from {@code source} into {@code target}, skipping entries
+     * whose value is {@code null} or blank.
+     *
+     * <p>Used for template-parameter merging so that an empty value (e.g. an
+     * unresolved {@code ${...}} placeholder that collapsed to an empty string)
+     * behaves as if the key were not present: it neither shadows a per-check
+     * {@code param.*} value nor defeats a template-level {@code ${name!'default'}}.
+     *
+     * @param target the map to copy non-blank entries into
+     * @param source the map to read entries from
+     */
+    private void putNonBlank(Map<String, String> target, Map<String, String> source) {
+        for (Map.Entry<String, String> e : source.entrySet()) {
+            if (e.getValue() != null && !e.getValue().isBlank()) {
+                target.put(e.getKey(), e.getValue());
+            }
+        }
+    }
+
+    /**
+     * Copies entries from an {@code Object}-valued {@code source} into a
+     * {@code String}-valued {@code target}, skipping entries whose value is
+     * {@code null} or (after {@code toString()}) blank.
+     *
+     * <p>Used to merge the scanned {@code templateEnv} layer (typed
+     * {@code Map<String, Object>} to match the template engine's model type) into
+     * the {@code String}-valued {@code templateParams} map. In practice
+     * {@link TemplateVarScanner} only ever emits trimmed, non-blank {@code String}
+     * values, so this is a straightforward copy.
+     *
+     * @param target the {@code String}-valued map to copy non-blank entries into
+     * @param source the {@code Object}-valued map to read entries from
+     */
+    private void putNonBlankObjects(Map<String, String> target, Map<String, Object> source) {
+        for (Map.Entry<String, Object> e : source.entrySet()) {
+            Object value = e.getValue();
+            if (value != null && !value.toString().isBlank()) {
+                target.put(e.getKey(), value.toString());
+            }
+        }
+    }
+
     // ── Service parsing ─────────────────────────────────────────────────────
 
     /**
      * Groups properties by the name segment after the prefix.
-     * E.g. {@code service.payments.url} → group "payments", key "url".
+     * E.g. {@code service.payments.url} &rarr; group "payments", key "url".
+     *
+     * @param props  the source map
+     * @param prefix the grouping prefix
+     * @return a map of group name to the group's key/value entries
      */
     private Map<String, Map<String, String>> extractGrouped(Map<String, String> props, String prefix) {
         Map<String, Map<String, String>> groups = new LinkedHashMap<>();
@@ -399,6 +476,7 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
             Map<String, Map<String, String>> checkRawMap,
             Map<String, ServiceConfig> serviceIndex,
             Map<String, String> defaults,
+            Map<String, Object> templateEnv,
             Set<String> validatorAliases) {
 
         List<CheckConfig> result = new ArrayList<>();
@@ -444,11 +522,10 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
                     checkName
             );
 
-            int retryCount = lookupInt(raw.get("retry.count"),
-                    defaults.get("retry.count"), DEFAULT_RETRY_COUNT);
+            int retryCount = lookupInt(raw.get("retry.count"), defaults.get("retry.count"), DEFAULT_RETRY_COUNT);
 
-            Duration retryDelay = lookupDuration(raw.get("retry.delay"),
-                    defaults.get("retry.delay"), "retry.delay", checkName);
+            Duration retryDelay = lookupDuration(raw.get(PARAM_RETRY_DELAY),
+                    defaults.get(PARAM_RETRY_DELAY), PARAM_RETRY_DELAY, checkName);
             if (retryDelay == null) {
                 retryDelay = DEFAULT_RETRY_DELAY;
             }
@@ -480,12 +557,15 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
                 }
             }
 
-            // Template params: merge default → check (check wins per key).
-            // param.* keys are case-sensitive (FreeMarker variable names).
+            // Template params: merge templateEnv → default param.* → check param.*.
+            // templateEnv (scanned environment-passthrough vars, spec §2.9.4) is the
+            // lowest-precedence layer — a param.* key of the same name overrides it.
+            // Blank values are treated as absent so an unresolved ${...} placeholder
+            // does not shadow a higher-precedence value.
             Map<String, String> templateParams = new LinkedHashMap<>();
-            templateParams.putAll(extractByPrefix(defaults, "param."));
-            templateParams.putAll(extractByPrefix(raw, "param."));
-
+            putNonBlankObjects(templateParams, templateEnv);
+            putNonBlank(templateParams, extractByPrefix(defaults, "param."));
+            putNonBlank(templateParams, extractByPrefix(raw, "param."));
 
             result.add(CheckConfig.builder()
                     .checkName(checkName)
@@ -536,6 +616,9 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     /**
      * Extracts header entries from a property map.
      * Keys matching {@code header.<name>} are extracted with the {@code header.} prefix stripped.
+     *
+     * @param raw the source property map
+     * @return a map of header name to header value
      */
     private Map<String, String> extractHeaders(Map<String, String> raw) {
         Map<String, String> headers = new LinkedHashMap<>();
@@ -552,6 +635,9 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
     /**
      * Merges header maps with case-insensitive key comparison.
      * Later maps override earlier maps for the same header name (case-insensitive).
+     *
+     * @param layers the header maps to merge, in increasing precedence order
+     * @return a new map with the merged headers
      */
     @SafeVarargs
     private Map<String, String> mergeHeaders(Map<String, String>... layers) {

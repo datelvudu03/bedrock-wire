@@ -1,4 +1,6 @@
 bedrock.wire.monitor.enabled=true
+##include bedrock-wire-monitor/src/cfg/env.param
+monitor.templateEnv.vars=_MODE
 monitor.default.interval=5s
 monitor.default.retry.count=1
 monitor.default.retry.delay=2s
