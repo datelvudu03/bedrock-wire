@@ -11,13 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for {@link TemplateVarScanner}: namespace exclusion, bare-identifier
- * filtering, dotted-key skipping, and blank-value handling.
+ * Tests for {@link TemplateVarScanner}: framework-namespace exclusion, dotted-key
+ * acceptance (flat — referenced from templates via {@code ${name\.with\.dots}}),
+ * and blank-value handling.
  */
 class TemplateVarScannerTest {
 
     @Test
-    void exposesLegalBareIdentifiers() {
+    void exposesBareIdentifierKeys() {
         Properties cfg = new Properties();
         cfg.setProperty("_MODE", "DEV");
         cfg.setProperty("mode", "PROD");
@@ -28,7 +29,34 @@ class TemplateVarScannerTest {
         assertEquals("DEV", vars.get("_MODE"));
         assertEquals("PROD", vars.get("mode"));
         assertEquals("hejny", vars.get("userId"));
-        assertEquals(3, vars.size());
+    }
+
+    @Test
+    void exposesDottedKeysAsFlatEntries() {
+        Properties cfg = new Properties();
+        cfg.setProperty("RUN.MODE", "DEV");
+        cfg.setProperty("USER.TYPE", "admin");
+        cfg.setProperty("some.app.setting", "X");
+
+        Map<String, Object> vars = TemplateVarScanner.scan(cfg);
+
+        // Flat entries: ${RUN\.MODE} in a template reads "RUN.MODE" directly.
+        assertEquals("DEV", vars.get("RUN.MODE"));
+        assertEquals("admin", vars.get("USER.TYPE"));
+        assertEquals("X", vars.get("some.app.setting"));
+    }
+
+    @Test
+    void coexistsBareAndDottedKeys() {
+        Properties cfg = new Properties();
+        cfg.setProperty("MODE", "X");
+        cfg.setProperty("MODE.MODE", "Y");
+
+        Map<String, Object> vars = TemplateVarScanner.scan(cfg);
+
+        // Both are independent flat keys — no scalar/hash collision.
+        assertEquals("X", vars.get("MODE"));
+        assertEquals("Y", vars.get("MODE.MODE"));
     }
 
     @Test
@@ -62,43 +90,16 @@ class TemplateVarScannerTest {
     }
 
     @Test
-    void skipsDottedKeysSilently() {
-        Properties cfg = new Properties();
-        cfg.setProperty("_MODE", "DEV");
-        cfg.setProperty("mode.mode", "X");
-        cfg.setProperty("some.app.setting", "Y");
-
-        Map<String, Object> vars = TemplateVarScanner.scan(cfg);
-
-        assertTrue(vars.containsKey("_MODE"));
-        assertFalse(vars.containsKey("mode.mode"));
-        assertFalse(vars.containsKey("some.app.setting"));
-        assertEquals(1, vars.size());
-    }
-
-    @Test
-    void skipsKeysStartingWithDigit() {
-        Properties cfg = new Properties();
-        cfg.setProperty("_MODE", "DEV");
-        cfg.setProperty("1mode", "X");
-
-        Map<String, Object> vars = TemplateVarScanner.scan(cfg);
-
-        assertTrue(vars.containsKey("_MODE"));
-        assertFalse(vars.containsKey("1mode"));
-    }
-
-    @Test
     void treatsBlankValueAsAbsent() {
         Properties cfg = new Properties();
         cfg.setProperty("_MODE", "");
-        cfg.setProperty("_REGION", "   ");
+        cfg.setProperty("RUN.MODE", "   ");
         cfg.setProperty("_OK", "value");
 
         Map<String, Object> vars = TemplateVarScanner.scan(cfg);
 
         assertFalse(vars.containsKey("_MODE"));
-        assertFalse(vars.containsKey("_REGION"));
+        assertFalse(vars.containsKey("RUN.MODE"));
         assertTrue(vars.containsKey("_OK"));
     }
 
@@ -106,10 +107,12 @@ class TemplateVarScannerTest {
     void trimsValues() {
         Properties cfg = new Properties();
         cfg.setProperty("_MODE", "  DEV  ");
+        cfg.setProperty("RUN.MODE", "\tPROD\n");
 
         Map<String, Object> vars = TemplateVarScanner.scan(cfg);
 
         assertEquals("DEV", vars.get("_MODE"));
+        assertEquals("PROD", vars.get("RUN.MODE"));
     }
 
     @Test
@@ -137,10 +140,13 @@ class TemplateVarScannerTest {
         Properties cfg = new ResolvingProperties();
         cfg.setProperty("_RAW", "DEV");
         cfg.setProperty("_MODE", "${_RAW}");
+        cfg.setProperty("RUN.RAW", "PROD");
+        cfg.setProperty("RUN.MODE", "${RUN.RAW}");
 
         Map<String, Object> vars = TemplateVarScanner.scan(cfg);
 
         assertEquals("DEV", vars.get("_MODE"));
+        assertEquals("PROD", vars.get("RUN.MODE"));
     }
 
     /**

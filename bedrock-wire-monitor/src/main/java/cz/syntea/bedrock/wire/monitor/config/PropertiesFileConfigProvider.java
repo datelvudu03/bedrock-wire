@@ -110,9 +110,10 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
         Map<String, String> monitorProps = extractMonitorProperties(props);
 
-        // Environment-passthrough variables: every legal bare-identifier key in the
-        // full configuration graph that is NOT under a framework namespace is exposed
-        // to all templates. Scanned from the raw props (a resolved PropertiesCfg), so
+        // Environment-passthrough variables: every non-blank key in the full
+        // configuration graph that is NOT under a framework namespace is exposed
+        // to all templates — including dotted keys (read as ${RUN\.MODE} in
+        // templates). Scanned from the raw props (a resolved PropertiesCfg), so
         // ${...} chains and env./sys. builtins are already applied. See spec §2.9.4.
         this.templateEnv = TemplateVarScanner.scan(props);
 
@@ -302,10 +303,12 @@ public class PropertiesFileConfigProvider implements MonitorConfigProvider {
 
     /**
      * Returns the environment-passthrough variables scanned from the full
-     * configuration graph (spec §2.9.4): every legal bare-identifier key outside
-     * the {@code monitor.*} and {@code bedrock.wire.monitor.*} namespaces. These
-     * are merged into every check's {@code templateParams} as the lowest-precedence
-     * layer.
+     * configuration graph (spec §2.9.4): every non-blank key outside the
+     * {@code monitor.*} and {@code bedrock.wire.monitor.*} namespaces, including
+     * keys with dots in the name (e.g. {@code RUN.MODE}) which are exposed as
+     * flat entries — templates read them with an escaped dot ({@code ${RUN\.MODE}}).
+     * These are merged into every check's {@code templateParams} as the
+     * lowest-precedence layer.
      *
      * @return immutable map of environment variables; never {@code null}, may be empty
      */

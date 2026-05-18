@@ -283,18 +283,23 @@ class PropertiesFileConfigProviderTest {
     }
 
     @Test
-    void shouldSkipDottedKeysInEnv() throws IOException {
+    void shouldExposeDottedKeysInEnv() throws IOException {
         Path file = writeConfig(tempDir,
                 "_MODE = DEV\n"
-                        + "some.app.setting = X\n"
+                        + "RUN.MODE = TST\n"
+                        + "USER.TYPE = admin\n"
                         + "monitor.service.svc.url = https://a.com\n"
                         + "monitor.check.c.service = svc\n"
                         + "monitor.check.c.interval = 5s\n"
         );
         PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
 
-        assertTrue(provider.getTemplateEnv().containsKey("_MODE"));
-        assertFalse(provider.getTemplateEnv().containsKey("some.app.setting"));
+        // Dotted keys are flat entries — template uses ${RUN\.MODE} / ${USER\.TYPE}.
+        assertEquals("DEV", provider.getTemplateEnv().get("_MODE"));
+        assertEquals("TST", provider.getTemplateEnv().get("RUN.MODE"));
+        assertEquals("admin", provider.getTemplateEnv().get("USER.TYPE"));
+        // monitor.* keys still excluded.
+        assertFalse(provider.getTemplateEnv().containsKey("monitor.service.svc.url"));
     }
 
     @Test

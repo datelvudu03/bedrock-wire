@@ -62,9 +62,20 @@ Params params = Params.combined(
 
 `TemplateVarScanner` turns a configuration graph (any `Properties` — typically a
 `PropertiesCfg` with `${...}` chains already resolved) into a flat model map of
-template-visible variables. A key is exposed when it is a legal bare FreeMarker
-identifier (`^[A-Za-z_][A-Za-z0-9_]*$`) and is **not** under `monitor.*` or
-`bedrock.wire.monitor.*`. Dotted keys and blank values are skipped silently.
+template-visible variables. Every non-blank key is exposed verbatim **except**
+keys under `monitor.*` and `bedrock.wire.monitor.*`, which are framework
+configuration and never reach the template.
+
+Dotted keys (`RUN.MODE`, `USER.TYPE`) are exposed as **flat** entries — the map
+is not nested. Read them from a template with an escaped dot
+(FreeMarker ≥ 2.3.22):
+
+```xml
+
+<ws:Request Mode="${RUN\.MODE}" Type="${USER\.TYPE}" Caller="${_MODE}"/>
+```
+
+The bracket form `${.vars['RUN.MODE']}` is equivalent.
 
 Scan once at startup, reuse across every render:
 
