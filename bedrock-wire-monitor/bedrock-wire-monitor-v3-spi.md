@@ -212,20 +212,20 @@ may have only one value.
 ```java
 public class CheckConfig {
 
-   String checkName;
-   String serviceName;
+    String checkName;
+    String serviceName;
 
-   HttpMethod method;
-   String path;
-   String query;
-   String templateFile;
+    HttpMethod method;
+    String path;
+    String query;
+    String templateFile;
 
-   int retryCount;
-   Duration retryDelay;
+    int retryCount;
+    Duration retryDelay;
 
-   Map<String, String> headers;
-   List<String> validators;
-   Map<String, String> validationParams; // keys without the "validation." prefix
+    Map<String, String> headers;
+    List<String> validators;
+    Map<String, String> validationParams; // keys without the "validation." prefix
 
 }
 ```
@@ -646,37 +646,40 @@ Template files MUST be UTF-8 (strict). Invalid UTF-8 → the check run terminate
 
 ### 2.9.4 Environment passthrough variables
 
-Configuration keys that live **outside** the framework namespaces are automatically exposed to every template as bare
-FreeMarker variables — no per-variable or per-check declaration is required.
+Configuration keys that live **outside** the framework namespaces are automatically exposed to every template — no
+per-variable or per-check declaration is required.
 
-A key is exposed when **both** hold:
+A key is exposed when it is **not** under `monitor.*` or `bedrock.wire.monitor.*`. Those namespaces are framework
+configuration (the monitor's own properties and the Spring auto-configuration toggle) and are never template variables.
+All other non-blank keys are exposed verbatim — **including keys whose names contain dots** (e.g. `RUN.MODE`,
+`USER.TYPE`). The model is **flat**: a dotted key becomes a single flat entry, not a nested hash.
 
-- it is **not** under `monitor.*` or `bedrock.wire.monitor.*` (those are framework configuration, never template
-  variables); and
-- it is a **legal bare FreeMarker identifier** — it matches `^[A-Za-z_][A-Za-z0-9_]*$`.
-
-Such keys are read from the **full** configuration graph — including keys pulled in via `##include` from other `.param`
+Keys are read from the **full** configuration graph — including keys pulled in via `##include` from other `.param`
 files — and injected into every template's model under their own names. Because the graph is a resolved
 `PropertiesCfg`, `${...}` chains and `env.`/`sys.` builtins are already applied before the scan.
 
 ```properties
-##include env.param           # env.param: _MODE = DEV
+##include env.param           # env.param: _MODE = TST, RUN.MODE = TST, USER.TYPE = admin
 ```
 ```xml
-<ws:Request Mode="${_MODE}"/>
+
+<ws:Request Mode="${RUN\.MODE}" Type="${USER\.TYPE}" Caller="${_MODE}"/>
 ```
 
-`Mode="DEV"` renders — with no `monitor.*.param._MODE` and no list declaration anywhere.
+`Mode="TST" Type="admin" Caller="TST"` renders — with no `monitor.*.param.*` declaration anywhere.
 
-**Dotted and namespaced keys are skipped silently.** FreeMarker reads `${a.b}` as hash access, so a flat dotted key
-(`some.app.setting`) is unreachable as a bare variable and is excluded; a configuration file legitimately contains many
-such keys that were never intended as template variables. Skipping is not an error.
+**Reading dotted keys.** FreeMarker reads an unescaped dot as hash dereference, so `${RUN.MODE}` would be interpreted as
+"property `MODE` of variable `RUN`". To read a flat dotted key, escape the dot with a backslash (FreeMarker ≥ 2.3.22):
+`${RUN\.MODE}`. The bracket-access form `${.vars['RUN.MODE']}` is equivalent. Bare-identifier keys are unaffected —
+`${_MODE}` and `${userId}` work as written.
 
 **Blank values are treated as absent.** A key whose resolved value is blank is omitted from the model, so the template
 MAY supply a default via `${name!'...'}`.
 
 **Precedence** (lowest to highest): scanned environment variables → `monitor.default.param.*` →
-`monitor.check.<check>.param.*`. A `param.*` key overrides a scanned variable of the same name.
+`monitor.check.<check>.param.*`. A `param.*` key overrides a scanned variable of the same name. Because the map is
+flat, even a dotted `param.*` key like `monitor.check.c.param.RUN.MODE = override` correctly overrides a scanned
+`RUN.MODE` — both end up as the same flat key in the merged map.
 
 There is **no startup validation** of template variable usage: with no declaration list, there is nothing to declare
 incorrectly. A template that references an undefined or misspelled variable (`${_MOED}`) fails at **render time** with
@@ -926,24 +929,24 @@ without any network communication:
 ```java
 public class StubTransport implements MonitorTransport {
 
-   private final Map<String, MonitorResult> responses = new ConcurrentHashMap<>();
+    private final Map<String, MonitorResult> responses = new ConcurrentHashMap<>();
 
-   public void stub(String serviceName, MonitorResult result) {
-      responses.put(serviceName, result);
-   }
+    public void stub(String serviceName, MonitorResult result) {
+        responses.put(serviceName, result);
+    }
 
-   @Override
-   public void init(List<ServiceConfig> services) {
-   }
+    @Override
+    public void init(List<ServiceConfig> services) {
+    }
 
-   @Override
-   public MonitorResult execute(MonitorRequest request) {
-      return responses.getOrDefault(request.getServiceName(), defaultOk());
-   }
+    @Override
+    public MonitorResult execute(MonitorRequest request) {
+        return responses.getOrDefault(request.getServiceName(), defaultOk());
+    }
 
-   @Override
-   public void close(Duration timeout) {
-   }
+    @Override
+    public void close(Duration timeout) {
+    }
 
 }
 ```
