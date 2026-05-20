@@ -1,5 +1,27 @@
 # bedrock-wire-monitor
 
+todo tran(hejny)
+CÍLOVÁ SKUPINA: Tento dokument je určen programátorovi a adminovi, kteří knihovnu
+používají — ne implementátorovi. Popis musí být srozumitelný z jejich pohledu.
+
+Template kontext (co FreeMarker dostane) není popsán. Doplnit:
+- Monitor interně předává do šablony parametry z více zdrojů — pořadí priorit
+  (pozdější přebíjí dřívější):
+    1. Spring env (filtrovaný přes springEnvPrefix)
+    2. monitor.default.config-file (volitelný)
+    3. monitor.default.param.*
+    4. monitor.service.<name>.config-file (volitelný)
+    5. monitor.service.<name>.param.*
+    6. monitor.check.<name>.config-file (volitelný)
+    7. monitor.check.<name>.param.*
+  config-file odkazuje na JSON soubor s parametry pro šablony.
+- CHYBÍ FEATURE: springEnvPrefix musí být konfigurovatelný na všech třech úrovních
+  (default / service / check). Default = "" (celý Spring env).
+  Příklad: monitor.default.springEnvPrefix=myapp.
+- Přidat odkaz na bedrock-wire-template/README.md kde je popsán Params API
+  a TemplateVarScanner.
+
+
 Periodic HTTP monitoring library for Java 21+. Runs health checks against configured services at fixed intervals,
 validates responses, and reports results through a listener API.
 
@@ -62,6 +84,9 @@ bedrock.wire.monitor.config-file=${app.configFile}
 bedrock.wire.client.max-clients=100
 ```
 
+todo tran(hejny) - proč je to vázáno na `application.properties` nebo `application.yml`?
+to by mělo být v externí konfiguraci
+
 ### 3. Create the .param configuration file
 
 The monitor reads its runtime configuration from a standalone `.properties` file (the `.param` file). This file uses the
@@ -121,19 +146,28 @@ The monitor uses two configuration sources:
 application.properties          src/cfg/xxxx.param
 (Spring Boot)                   (standalone .properties)
 ┌─────────────────────┐         ┌──────────────────────────────┐
-│ bedrock.wire.monitor │         │ monitor.default.*            │
-│   .config-file ──────┼────────▶│ monitor.tls.<profile>.*     │
-│   .enabled           │         │ monitor.service.<name>.*     │
-│                      │         │ monitor.check.<name>.*       │
-│ bedrock.wire.client  │         │ monitor.executor.*           │
-│   .max-clients       │         └──────────────────────────────┘
+│ bedrock.wire.monitor│         │ monitor.default.*            │
+│   .config-file ─────┼────────▶│ monitor.tls.<profile>.*     │
+│   .enabled          │         │ monitor.service.<name>.*     │
+│                     │         │ monitor.check.<name>.*       │
+│ bedrock.wire.client │         │ monitor.executor.*           │
+│   .max-clients      │         └──────────────────────────────┘
 └─────────────────────┘
 ```
+
+todo tran(hejny)
+- Opravit zarovnání ASCII diagramu.
+- CHYBÍ DOKUMENTACE: monitor.<level>.config-file — cesta k JSON souboru jehož obsah
+  vstupuje do template kontextu. Existuje na všech třech úrovních
+  (default / service / check), volitelný. Viz pořadí priorit v prvním TODO.
 
 **Why two files?** Spring-level settings (starter enablement, file path, registry capacity) belong in
 `application.properties` where Spring can resolve placeholders and profiles.
 Monitor runtime config (services, checks, TLS) is typically managed by operations teams via a separate file
 that can be updated independently of the application deployment.
+
+todo tran(hejny) - tomu nerozumím - mluví se o application.properties a *.param - ale to obecně nejsou dva soubory?
+                   ani věcně nerozumím tomu rozdělení - proč vůbec zmiňuje application.properties
 
 ### .param file reference
 
@@ -243,12 +277,12 @@ The name `default` cannot be used as a service or check name. It is reserved for
 │                     Monitor layer                       │
 │                                                         │
 │  MonitorEngine          CheckRunner        Validators   │
-│  (SmartLifecycle)       (retry, status     (httpStatus,  │
-│  scheduler,              mapping, listener  contains,    │
-│  virtual threads)        notification)      regex, ...)  │
+│  (SmartLifecycle)       (retry, status     (httpStatus, │
+│  scheduler,              mapping, listener  contains,   │
+│  virtual threads)        notification)      regex, ...) │
 │                                                         │
-│  PropertiesFile         TemplateRenderer               │
-│  ConfigProvider         (FreeMarker, ${param})         │
+│  PropertiesFile         TemplateRenderer                │
+│  ConfigProvider         (FreeMarker, ${param})          │
 └──────────────────────────┬──────────────────────────────┘
                            │
              ══════════════╪══════════════
@@ -461,9 +495,7 @@ For testing monitor behavior without network calls:
 
 ```java
 StubTransport transport = new StubTransport();
-transport.
-
-stub("myService",StubTransport.response(200, "<status>OK</status>"));
+transport.stub("myService", StubTransport.response(200, "<status>OK</status>"));
 
 CheckRunner runner = new CheckRunner(transport, new ValidatorRegistry(),
         TemplateRenderer.create(), List.of(result -> { /* assert */ }));
@@ -494,21 +526,12 @@ class MonitorIntegrationTest {
 
 ```java
 new ApplicationContextRunner()
-    .
-
-withConfiguration(AutoConfigurations.of(
-                          WireClientTransportAutoConfiguration.class,
-                  BedrockWireMonitorAutoConfiguration .class))
-        .
-
-withPropertyValues("bedrock.wire.monitor.config-file=test.properties")
-    .
-
-run(context ->{
-
-assertThat(context).
-
-hasSingleBean(ValidatorRegistry .class);
+    .withConfiguration(AutoConfigurations.of(
+            WireClientTransportAutoConfiguration.class,
+            BedrockWireMonitorAutoConfiguration.class))
+    .withPropertyValues("bedrock.wire.monitor.config-file=test.properties")
+    .run(context -> {
+        assertThat(context).hasSingleBean(ValidatorRegistry.class);
     });
 ```
 
