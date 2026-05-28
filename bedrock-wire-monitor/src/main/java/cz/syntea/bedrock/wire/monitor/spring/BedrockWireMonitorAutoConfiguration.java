@@ -20,6 +20,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.env.Environment;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -37,7 +38,8 @@ import java.util.Set;
  *   <li>{@link ValidatorRegistry} — pre-loaded with built-in validators plus
  *       any custom {@link Validator} beans from the context.</li>
  *   <li>{@link MonitorConfigProvider} — default implementation reading from
- *       the {@code .param} file specified by {@code bedrock.wire.monitor.config-file}.</li>
+ *       the {@code .param} file specified by {@code bedrock.wire.monitor.config-file},
+ *       or auto-detected from a {@link Properties} bean in the context.</li>
  *   <li>{@link MonitorTransport} — default
  *       {@link cz.syntea.bedrock.wire.monitor.transport.WireClientTransport}
  *       registered by {@link WireClientTransportAutoConfiguration} when
@@ -46,34 +48,27 @@ import java.util.Set;
  *       {@link org.springframework.context.SmartLifecycle}.</li>
  * </ul>
  *
- * <h3>Template rendering</h3>
- * The {@link TemplateRenderer} used by {@link MonitorEngine} is resolved via
- * {@link ObjectProvider}: if a {@link TemplateRenderer} bean exists in the context
- * (typically registered by {@link TemplateAutoConfiguration} from
- * {@code bedrock-wire-template}), it is reused. Otherwise an internal default is
- * created via {@link TemplateRenderer#create()}. {@code @AutoConfiguration(after =
- * TemplateAutoConfiguration.class)} ensures the user-provided / default-bean path
- * is evaluated before this auto-config runs.
+ * <h3>Template-context model (1.0.6.0)</h3>
+ * The auto-configuration injects the Spring {@link Environment} into the default
+ * provider so that layer 1 of the v3 template-context model (spec §2.9) is
+ * populated. Per-level {@code springEnvPrefix} keys in the {@code .param} file
+ * control which subset of the Spring environment is exposed; default is no filter
+ * (every Spring property exposed — see README "Template context" section).
  *
- * <h3>Customization</h3>
- * Declare your own {@code @Bean} of any of the above types to override defaults.
- * For example, provide a custom {@link MonitorTransport} to replace the
- * wire-client-based default, or a custom {@link TemplateRenderer} to apply
- * non-default FreeMarker settings.
- *
- * <h3>Disabling</h3>
- * Set {@code bedrock.wire.monitor.enabled=false} to disable the entire monitor.
+ * <h3>Path resolution (1.0.6.0)</h3>
+ * When the provider is constructed from a file path, the file's parent directory
+ * becomes the {@code configFileRoot} for resolving relative TLS, {@code config-file},
+ * and {@code templateFile} paths. When auto-detected from a {@link Properties} bean,
+ * the root is derived from {@code bedrock.wire.monitor.config-file} if set; otherwise
+ * paths fall back to the JVM working directory (with a WARN logged by the provider).
  */
 @Slf4j
 @AutoConfiguration(after = TemplateAutoConfiguration.class)
 @EnableConfigurationProperties(BedrockWireMonitorProperties.class)
-@ConditionalOnProperty(name = "bedrock.wire.monitor.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "bedrock.wire.monitor.enabled", havingValue = "true",
+        matchIfMissing = true)
 public class BedrockWireMonitorAutoConfiguration {
 
-    /**
-     * Bean names of Spring-internal {@link Properties} instances that must be
-     * excluded when auto-detecting the application's configuration bean.
-     */
     private static final Set<String> SPRING_INFRASTRUCTURE_PROPERTIES = Set.of(
             "systemProperties", "systemEnvironment"
     );
@@ -95,25 +90,26 @@ public class BedrockWireMonitorAutoConfiguration {
     }
 
     /**
-     * Registers the default {@link MonitorConfigProvider} that reads the
-     * {@code monitor.*} namespace.
+     * Registers the default {@link MonitorConfigProvider}.
      *
-     * <h3>Configuration source resolution (priority order)</h3>
+     * <h3>Configuration source resolution</h3>
      * <ol>
-     *   <li>Auto-detection: the context is scanned for {@link Properties} beans.
-     *       Spring infrastructure beans ({@code systemProperties},
-     *       {@code systemEnvironment}) are excluded. If exactly one application
-     *       {@code Properties} bean remains (e.g. a {@code PropertiesCfg} loaded
-     *       from {@code --app.configFile}), it is used directly — no extra
-     *       annotation or property is needed on the application side.</li>
-     *   <li>Fallback: if no suitable bean is found (or multiple candidates exist),
-     *       the {@code bedrock.wire.monitor.config-file} property is used to locate
-     *       and parse a standalone {@code .properties} file.</li>
+     *   <li>Auto-detection: scan for application {@link Properties} beans, skipping
+     *       Spring infrastructure. If exactly one is found, use it. The
+     *       {@code configFileRoot} is derived from
+     *       {@code bedrock.wire.monitor.config-file} when set; otherwise null
+     *       (JVM working dir fallback with WARN).</li>
+     *   <li>Fallback: {@code bedrock.wire.monitor.config-file} → file-based load.
+     *       The file's parent directory becomes the {@code configFileRoot}.</li>
      * </ol>
+     *
+     * <p>The Spring {@link Environment} is always passed to the provider to enable
+     * layer 1 of the template-context model.
      *
      * @param properties         the monitor starter properties
      * @param validatorRegistry  the validator registry (for alias validation)
      * @param applicationContext the Spring application context
+     * @param environment        the Spring environment (layer 1 of template model)
      * @return the config provider
      */
     @Bean
@@ -121,40 +117,68 @@ public class BedrockWireMonitorAutoConfiguration {
     public MonitorConfigProvider monitorConfigProvider(
             BedrockWireMonitorProperties properties,
             ValidatorRegistry validatorRegistry,
-            ApplicationContext applicationContext) {
+            ApplicationContext applicationContext,
+            Environment environment) {
 
-        // 1. Auto-detect: find application Properties beans, skip Spring infrastructure
         Properties detected = detectApplicationProperties(applicationContext);
         if (detected != null) {
-            log.info("Auto-detected monitor configuration from Properties bean: {} (class: {})",
-                    getBeanName(applicationContext, detected), detected.getClass().getSimpleName());
-            return new PropertiesFileConfigProvider(detected, validatorRegistry.getAliases());
+            Path inferredRoot = inferConfigFileRoot(properties);
+            log.info("Auto-detected monitor configuration from Properties bean: {} "
+                            + "(class: {}, configFileRoot: {})",
+                    getBeanName(applicationContext, detected),
+                    detected.getClass().getSimpleName(),
+                    inferredRoot);
+            return PropertiesFileConfigProvider.builder()
+                    .props(detected)
+                    .validatorAliases(validatorRegistry.getAliases())
+                    .configFileRoot(inferredRoot)
+                    .environment(environment)
+                    .build();
         }
 
-        // 2. Fall back to bedrock.wire.monitor.config-file
         String configFile = properties.getConfigFile();
         if (configFile == null || configFile.isBlank()) {
             throw new IllegalStateException(
                     "No application Properties bean detected in the context and "
                             + "'bedrock.wire.monitor.config-file' is not set. "
-                            + "Either register a Properties bean (e.g. PropertiesCfg) containing "
-                            + "the monitor.* namespace, or set bedrock.wire.monitor.config-file "
-                            + "to the path of your .param/.properties file.");
+                            + "Either register a Properties bean (e.g. PropertiesCfg) "
+                            + "containing the monitor.* namespace, or set "
+                            + "bedrock.wire.monitor.config-file to the path of your "
+                            + ".param/.properties file.");
         }
 
         Path path = Path.of(configFile);
         log.info("Loading monitor configuration from file: {}", path.toAbsolutePath());
-        return new PropertiesFileConfigProvider(path, validatorRegistry.getAliases());
+        Properties fileProps = loadPropertiesOrThrow(path);
+        return PropertiesFileConfigProvider.builder()
+                .props(fileProps)
+                .validatorAliases(validatorRegistry.getAliases())
+                .configFileRoot(path.toAbsolutePath().getParent())
+                .environment(environment)
+                .build();
     }
 
-    /**
-     * Scans the application context for {@link Properties} beans, filtering out
-     * Spring infrastructure beans. Returns the single application bean if exactly
-     * one is found, or {@code null} otherwise.
-     *
-     * @param context Spring application context; never {@code null}
-     * @return the single application {@link Properties} bean, or {@code null}
-     */
+    private Path inferConfigFileRoot(BedrockWireMonitorProperties properties) {
+        String configFile = properties.getConfigFile();
+        if (configFile == null || configFile.isBlank()) {
+            return null;
+        }
+        return Path.of(configFile).toAbsolutePath().getParent();
+    }
+
+    private Properties loadPropertiesOrThrow(Path path) {
+        if (!java.nio.file.Files.exists(path)) {
+            throw new IllegalArgumentException("Config file does not exist: " + path);
+        }
+        Properties props = new Properties();
+        try (var is = java.nio.file.Files.newInputStream(path)) {
+            props.load(is);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException("Failed to load config file: " + path, e);
+        }
+        return props;
+    }
+
     private Properties detectApplicationProperties(ApplicationContext context) {
         Map<String, Properties> allBeans = context.getBeansOfType(Properties.class);
 
@@ -177,13 +201,6 @@ public class BedrockWireMonitorAutoConfiguration {
         return null;
     }
 
-    /**
-     * Resolves the bean name for a given instance (for logging purposes).
-     *
-     * @param context Spring application context; never {@code null}
-     * @param bean    the bean instance to look up
-     * @return the bean name, or {@code "unknown"} if not found
-     */
     private String getBeanName(ApplicationContext context, Properties bean) {
         return context.getBeansOfType(Properties.class).entrySet().stream()
                 .filter(e -> e.getValue() == bean)
@@ -195,30 +212,12 @@ public class BedrockWireMonitorAutoConfiguration {
     /**
      * Registers the {@link MonitorEngine} orchestrator.
      *
-     * <p>Implements {@link org.springframework.context.SmartLifecycle} for
-     * auto-start on context refresh and graceful stop on context close.
-     * Also exposes programmatic {@code start()} / {@code stop()}.
-     *
-     * <h3>Template renderer resolution</h3>
-     * The {@link TemplateRenderer} is resolved through {@link ObjectProvider}:
-     * if a bean exists in the context (registered by {@link TemplateAutoConfiguration}
-     * or by the user), it is used; otherwise {@link TemplateRenderer#create()} is
-     * invoked to obtain a default. This preserves user customization while keeping
-     * the monitor functional in non-Spring usage of the engine API or when the
-     * template auto-configuration is disabled.
-     *
-     * <h3>Shutdown timeout resolution</h3>
-     * If the config provider is a {@link PropertiesFileConfigProvider}, its parsed
-     * {@code monitor.executor.shutdownTimeout} value is used. Otherwise,
-     * {@code bedrock.wire.monitor.shutdown-timeout} from Spring properties is
-     * used (default: 30s).
-     *
-     * @param configProvider          the config provider
-     * @param transport               the transport
-     * @param validatorRegistry       the validator registry
+     * @param configProvider           the config provider
+     * @param transport                the transport
+     * @param validatorRegistry        the validator registry
      * @param templateRendererProvider provider for the optional {@link TemplateRenderer} bean
-     * @param listeners               all registered result listeners
-     * @param properties              the monitor starter properties (for shutdown timeout fallback)
+     * @param listeners                all registered result listeners
+     * @param properties               the monitor starter properties (shutdown timeout fallback)
      * @return the monitor engine
      */
     @Bean
@@ -232,17 +231,16 @@ public class BedrockWireMonitorAutoConfiguration {
             ObjectProvider<List<MonitorResultListener>> listeners,
             BedrockWireMonitorProperties properties) {
 
-        // Resolve shutdown timeout: .param file value > Spring property > default
         java.time.Duration shutdownTimeout = properties.getShutdownTimeout();
         if (configProvider instanceof PropertiesFileConfigProvider concreteProvider) {
             shutdownTimeout = concreteProvider.getShutdownTimeout();
         }
 
-        // Resolve TemplateRenderer: prefer user bean, fall back to default factory
         TemplateRenderer templateRenderer = templateRendererProvider
                 .getIfAvailable(TemplateRenderer::create);
         log.info("MonitorEngine using TemplateRenderer: {}",
-                templateRendererProvider.getIfAvailable() != null ? "context bean" : "internal default");
+                templateRendererProvider.getIfAvailable() != null
+                        ? "context bean" : "internal default");
 
         List<MonitorResultListener> listenerList = listeners.getIfAvailable();
         return new MonitorEngine(
@@ -255,15 +253,9 @@ public class BedrockWireMonitorAutoConfiguration {
         );
     }
 
-    // ── Startup diagnostics ─────────────────────────────────────────────────
-
     /**
-     * Checks at startup whether critical beans are present and logs
-     * actionable diagnostics if they are missing.
-     *
-     * <p>Fires on {@link ContextRefreshedEvent}, after all beans are created
-     * and conditional evaluations are complete. This catches the silent failure
-     * where config loads successfully but the transport/engine chain is broken.
+     * Fires on {@link ContextRefreshedEvent} to catch the silent failure where config
+     * loads successfully but the transport/engine chain is broken.
      *
      * @param event Spring context-refreshed event; never {@code null}
      */

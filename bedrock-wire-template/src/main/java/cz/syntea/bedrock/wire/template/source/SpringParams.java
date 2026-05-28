@@ -6,13 +6,15 @@ import org.springframework.core.env.EnumerablePropertySource;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.PropertySource;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * {@link Params} source bound to a Spring {@link Environment}. Reads all properties
- * matching the configured prefix, strips the prefix, and rebuilds the remaining
- * dot-separated key segments into a nested-map structure.
+ * matching the configured prefix (or every property if no prefix is given), strips the
+ * prefix, and rebuilds the remaining dot-separated key segments into a nested-map
+ * structure.
  *
  * <p>Example with prefix {@code "monitor.check.x."}:
  * <pre>
@@ -20,9 +22,18 @@ import java.util.Map;
  *   monitor.check.x.b.c     = 2   →  {b: {c: "2"}}
  * </pre>
  *
- * <p>The prefix is REQUIRED. There is no overload that exposes the entire environment —
- * this is a deliberate security choice to prevent leaking unrelated properties (e.g.
- * datasource passwords) into rendered templates.
+ * <h3>Prefix policy (changed in 1.0.6.0)</h3>
+ * Prior to 1.0.6.0 the prefix was REQUIRED at the type level. From 1.0.6.0 a {@code null}
+ * or blank prefix is treated as <b>no prefix filter</b> — every key returned by the
+ * environment's enumerable property sources is exposed. The change supports the
+ * {@code bedrock-wire-monitor} v3 template-context model, whose layer-1 Spring binding
+ * defaults to no prefix. See the Architecture-template ADR
+ * <i>"SpringParams accepts a blank prefix"</i> for the full rationale.
+ *
+ * <p><b>Security note.</b> The earlier structural guarantee that no {@code SpringParams}
+ * instance could expose {@code spring.datasource.password} (or other Spring-bound secrets)
+ * is no longer enforced. Callers SHOULD pass a non-blank prefix unless they have
+ * independently audited the Spring {@link Environment} and accepted exposure of every key.
  *
  * @since 1.0
  */
@@ -34,22 +45,21 @@ public final class SpringParams implements Params {
     /**
      * Creates a new instance.
      *
+     * <p>Pass a non-blank {@code prefix} to filter properties to a known configuration
+     * section; pass {@code null} or blank to expose every property in the environment
+     * (see class-level security note).
+     *
      * @param environment Spring environment; never {@code null}
-     * @param prefix      property prefix; never {@code null} or blank
-     * @throws TemplateParamException if {@code environment} is {@code null} or
-     *                                {@code prefix} is {@code null} / blank
+     * @param prefix      property prefix to filter and strip; {@code null} or blank means
+     *                    no filter (every property is exposed)
+     * @throws TemplateParamException if {@code environment} is {@code null}
      */
     public SpringParams(Environment environment, String prefix) {
         if (environment == null) {
             throw new TemplateParamException("SpringParams: environment MUST NOT be null");
         }
-        if (prefix == null || prefix.isBlank()) {
-            throw new TemplateParamException(
-                    "SpringParams: prefix is REQUIRED (security: prevents leaking unrelated "
-                            + "properties such as datasource passwords)");
-        }
         this.environment = environment;
-        this.prefix = prefix;
+        this.prefix = (prefix == null || prefix.isBlank()) ? "" : prefix;
     }
 
     @SuppressWarnings("unchecked")
@@ -74,9 +84,9 @@ public final class SpringParams implements Params {
      * {@inheritDoc}
      *
      * <p>Iterates {@link EnumerablePropertySource}s of the environment, filters keys by
-     * prefix, and resolves each via {@link Environment#getProperty(String)} (so
-     * placeholders are honored). Stripped tail keys are reassembled into a nested-map
-     * structure.
+     * prefix (no filter if the prefix is empty), and resolves each via
+     * {@link Environment#getProperty(String)} (so placeholders are honored). Stripped tail
+     * keys are reassembled into a nested-map structure.
      *
      * @return resolved parameter map
      */
@@ -84,10 +94,10 @@ public final class SpringParams implements Params {
     public Map<String, Object> asMap() {
         Map<String, Object> result = new LinkedHashMap<>();
         for (String key : enumerateKeys()) {
-            if (!key.startsWith(prefix)) {
+            if (!prefix.isEmpty() && !key.startsWith(prefix)) {
                 continue;
             }
-            String tail = key.substring(prefix.length());
+            String tail = prefix.isEmpty() ? key : key.substring(prefix.length());
             if (tail.isEmpty()) {
                 continue;
             }
@@ -104,9 +114,7 @@ public final class SpringParams implements Params {
         if (environment instanceof ConfigurableEnvironment ce) {
             for (PropertySource<?> ps : ce.getPropertySources()) {
                 if (ps instanceof EnumerablePropertySource<?> eps) {
-                    for (String name : eps.getPropertyNames()) {
-                        keys.add(name);
-                    }
+                    keys.addAll(Arrays.asList(eps.getPropertyNames()));
                 }
             }
         }

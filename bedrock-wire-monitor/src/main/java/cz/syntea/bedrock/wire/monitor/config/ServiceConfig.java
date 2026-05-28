@@ -12,7 +12,8 @@ import java.util.Map;
  * Immutable configuration for a single monitored service.
  *
  * <p>Represents a target HTTP service with its base URL, polling interval,
- * default headers, and transport-specific properties.
+ * default headers, transport-specific properties, and service-level template
+ * parameters.
  *
  * <h3>Transport properties</h3>
  * The {@link #getTransportProperties()} map is an opaque bag of key-value pairs
@@ -20,6 +21,14 @@ import java.util.Map;
  * implementation during {@code init()}. The monitor layer does not parse,
  * validate, or interpret these properties — that responsibility belongs
  * entirely to the transport implementation.
+ *
+ * <h3>Template parameters</h3>
+ * The {@link #getTemplateParams()} map carries the service-level
+ * {@code monitor.service.<name>.param.*} layer of the template-context model
+ * (spec §2.9, layer 5). Keys are stored flat (without the {@code param.}
+ * prefix) and are merged into every check's template model at parse time, sitting
+ * between the {@code default.param.*} layer (3) and the {@code check.param.*}
+ * layer (7).
  *
  * <h3>URL contract</h3>
  * {@link #getUrl()} contains the base URL of the service. The exact format
@@ -65,4 +74,20 @@ public class ServiceConfig {
      */
     @Singular("transportProperty")
     Map<String, String> transportProperties;
+
+    /**
+     * Service-level template parameters parsed from
+     * {@code monitor.service.<name>.param.*}. Keys are stored without the
+     * {@code param.} prefix.
+     *
+     * <p>Per spec §2.9 (template-context model), these are layer 5 of the
+     * 7-layer precedence; they are merged into every check's template model
+     * between {@code default.param.*} (layer 3) and {@code check.param.*} (layer 7).
+     * Flat semantics — {@code monitor.service.payments.param.clientId = x} is
+     * read in templates as {@code ${clientId}}, not {@code ${service.payments.clientId}}.
+     *
+     * <p>Never {@code null}; may be empty.
+     */
+    @Singular("templateParam")
+    Map<String, String> templateParams;
 }

@@ -15,10 +15,11 @@ import java.util.Map;
  *
  * <h3>Sources</h3>
  * <ul>
- *   <li>{@link #of(Map)}                — inline programmatic parameters</li>
- *   <li>{@link #fromJson(Path)}         — JSON file with nested objects</li>
- *   <li>{@link #fromSpring(Environment, String)} — Spring properties under a required prefix</li>
- *   <li>{@link #combined(Params...)}    — deep-merge of multiple sources; last wins</li>
+ *   <li>{@link #of(Map)}                            — inline programmatic parameters</li>
+ *   <li>{@link #fromJson(Path)}                     — JSON file with nested objects</li>
+ *   <li>{@link #fromSpring(Environment, String)}    — Spring properties under a prefix</li>
+ *   <li>{@link #fromSpring(Environment)}            — Spring properties, no prefix filter</li>
+ *   <li>{@link #combined(Params...)}                — deep-merge of multiple sources; last wins</li>
  * </ul>
  *
  * @since 1.0
@@ -58,16 +59,36 @@ public sealed interface Params permits MapParams, JsonParams, SpringParams, Comb
      * maps. Example: with prefix {@code "monitor.check.x."}, the property
      * {@code monitor.check.x.a.b = 1} resolves to {@code {a: {b: "1"}}}.
      *
-     * <p>The prefix is REQUIRED to prevent accidental exposure of sensitive properties
-     * (datasource passwords, secrets). There is no overload without a prefix.
+     * <p>A {@code null} or blank prefix is allowed since 1.0.6.0 and is equivalent to
+     * calling {@link #fromSpring(Environment)} — every property is exposed without
+     * filtering. See {@link SpringParams} for the security implications of an empty
+     * prefix and the reason for the policy change.
      *
      * @param env    Spring {@link Environment} to read from; never {@code null}
-     * @param prefix property prefix to filter and strip; never {@code null} or blank
+     * @param prefix property prefix to filter and strip; {@code null} or blank means no
+     *               filter
      * @return a new {@link SpringParams} instance
-     * @throws TemplateParamException if {@code prefix} is {@code null} or blank
+     * @throws TemplateParamException if {@code env} is {@code null}
      */
     static Params fromSpring(Environment env, String prefix) {
         return new SpringParams(env, prefix);
+    }
+
+    /**
+     * Reads every property from the Spring {@link Environment} with no prefix filter.
+     * Equivalent to {@link #fromSpring(Environment, String)} with a {@code null} prefix.
+     *
+     * <p><b>Security note.</b> This exposes every key returned by the environment's
+     * enumerable property sources — including {@code spring.datasource.password} and any
+     * other Spring-bound secret. Prefer the prefixed overload unless the caller has
+     * audited the {@link Environment} contents and accepted the exposure.
+     *
+     * @param env Spring {@link Environment} to read from; never {@code null}
+     * @return a new {@link SpringParams} instance with no prefix filter
+     * @throws TemplateParamException if {@code env} is {@code null}
+     */
+    static Params fromSpring(Environment env) {
+        return new SpringParams(env, null);
     }
 
     /**

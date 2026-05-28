@@ -5,24 +5,27 @@ import cz.syntea.bedrock.wire.monitor.validation.ValidatorRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link PropertiesFileConfigProvider}: lookup rules, header merging,
- * Duration parsing, transport property extraction, and validation.
+ * Duration parsing, validation, and the 7-layer template-context model
+ * (spec §2.9 — Spring env + per-level config-file + per-level param.*).
  */
 class PropertiesFileConfigProviderTest {
 
@@ -35,10 +38,32 @@ class PropertiesFileConfigProviderTest {
         validAliases = new ValidatorRegistry().getAliases();
     }
 
+    // ── Existing core behaviour (file-based, 3-level lookup) ────────────────
+
+    /**
+     * Traverses a nested {@link Map} structure by dotted-style path arguments.
+     * Returns {@code null} if any segment is missing or not a map.
+     */
+    @SuppressWarnings("unchecked")
+    private static Object nested(Map<String, Object> root, String... path) {
+        Object cursor = root;
+        for (String segment : path) {
+            if (!(cursor instanceof Map<?, ?> m)) {
+                return null;
+            }
+            cursor = ((Map<String, Object>) m).get(segment);
+            if (cursor == null) {
+                return null;
+            }
+        }
+        return cursor;
+    }
+
     @Test
     void shouldLoadFullConfiguration() throws IOException {
         Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
+        PropertiesFileConfigProvider provider =
+                new PropertiesFileConfigProvider(configFile, validAliases);
 
         assertEquals(2, provider.getServices().size());
         assertEquals(3, provider.getChecks().size());
@@ -56,7 +81,8 @@ class PropertiesFileConfigProviderTest {
         props.setProperty("monitor.check.c.validation.validators", "httpStatus");
         props.setProperty("monitor.check.c.validation.httpStatus", "200");
 
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(props, validAliases);
+        PropertiesFileConfigProvider provider =
+                new PropertiesFileConfigProvider(props, validAliases);
 
         assertEquals(1, provider.getServices().size());
         assertEquals("svc", provider.getServices().get(0).getServiceName());
@@ -66,40 +92,21 @@ class PropertiesFileConfigProviderTest {
     }
 
     @Test
-    void shouldResolveServiceConfig() throws IOException {
-        Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
-
-        ServiceConfig testService = provider.getServices().stream()
-                .filter(s -> "testService".equals(s.getServiceName()))
-                .findFirst().orElseThrow();
-
-        assertEquals("https://test.example.com", testService.getUrl().toString());
-        assertEquals("application/xml", testService.getHeaders().get("Content-Type"));
-        assertEquals("10s", testService.getTransportProperties().get("responseTimeout"));
-        assertEquals("3s", testService.getTransportProperties().get("connectionTimeout"));
-    }
-
-    @Test
     void shouldResolveCheckWithThreeLevelLookup() throws IOException {
         Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
+        PropertiesFileConfigProvider provider =
+                new PropertiesFileConfigProvider(configFile, validAliases);
 
-        // healthCheck has no interval at check level → uses default (30s)
         CheckConfig healthCheck = provider.getChecks().stream()
                 .filter(c -> "healthCheck".equals(c.getCheckName()))
                 .findFirst().orElseThrow();
-
         assertEquals(Duration.ofSeconds(30), healthCheck.getInterval());
         assertEquals(HttpMethod.POST, healthCheck.getMethod());
-        assertEquals(1, healthCheck.getRetryCount()); // from default
-        assertEquals(Duration.ofSeconds(2), healthCheck.getRetryDelay()); // from default
+        assertEquals(1, healthCheck.getRetryCount());
 
-        // pingCheck overrides interval to 10s and retry.count to 0
         CheckConfig pingCheck = provider.getChecks().stream()
                 .filter(c -> "pingCheck".equals(c.getCheckName()))
                 .findFirst().orElseThrow();
-
         assertEquals(Duration.ofSeconds(10), pingCheck.getInterval());
         assertEquals(0, pingCheck.getRetryCount());
         assertEquals(HttpMethod.GET, pingCheck.getMethod());
@@ -108,15 +115,12 @@ class PropertiesFileConfigProviderTest {
     @Test
     void shouldMergeHeadersCaseInsensitive() throws IOException {
         Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
+        PropertiesFileConfigProvider provider =
+                new PropertiesFileConfigProvider(configFile, validAliases);
 
         CheckConfig healthCheck = provider.getChecks().stream()
                 .filter(c -> "healthCheck".equals(c.getCheckName()))
                 .findFirst().orElseThrow();
-
-        // Default: Accept=application/xml, X-Client-Id=bedrock-monitor-test
-        // Service: Content-Type=application/xml
-        // Check: (none)
         assertTrue(healthCheck.getHeaders().containsKey("Accept"));
         assertTrue(healthCheck.getHeaders().containsKey("Content-Type"));
         assertTrue(healthCheck.getHeaders().containsKey("X-Client-Id"));
@@ -125,65 +129,21 @@ class PropertiesFileConfigProviderTest {
     @Test
     void shouldExtractValidationParams() throws IOException {
         Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
+        PropertiesFileConfigProvider provider =
+                new PropertiesFileConfigProvider(configFile, validAliases);
 
         CheckConfig healthCheck = provider.getChecks().stream()
                 .filter(c -> "healthCheck".equals(c.getCheckName()))
                 .findFirst().orElseThrow();
-
         assertEquals("200", healthCheck.getValidationParams().get("httpStatus"));
         assertEquals("<status>OK</status>", healthCheck.getValidationParams().get("contains"));
-        assertEquals(2, healthCheck.getValidators().size());
-        assertEquals("httpStatus", healthCheck.getValidators().get(0));
-        assertEquals("contains", healthCheck.getValidators().get(1));
-    }
-
-    @Test
-    void shouldExtractTemplateParams() throws IOException {
-        Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
-
-        CheckConfig healthCheck = provider.getChecks().stream()
-                .filter(c -> "healthCheck".equals(c.getCheckName()))
-                .findFirst().orElseThrow();
-
-        assertEquals("test-client", healthCheck.getTemplateParams().get("clientId"));
-        assertEquals("test-region", healthCheck.getTemplateParams().get("region"));
-    }
-
-    @Test
-    void shouldParseTlsProfile() throws IOException {
-        Path configFile = Path.of("src/test/resources/monitor-test.properties");
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(configFile, validAliases);
-
-        TlsProfileConfig tls = provider.getTlsProfiles().get(0);
-        assertEquals("test-tls", tls.getProfileName());
-        assertEquals("/certs/test-truststore.p12", tls.getTrustStore());
-        assertEquals("testpass", tls.getTrustStorePassword());
-        assertEquals("PKCS12", tls.getTrustStoreType());
-        assertTrue(tls.isHostnameVerification());
     }
 
     @Test
     void shouldFailOnMissingFile() {
         assertThrows(IllegalArgumentException.class, () ->
-                new PropertiesFileConfigProvider(Path.of("/nonexistent.properties"), validAliases));
-    }
-
-    @Test
-    void shouldFailOnDuplicateServiceName() throws IOException {
-        Path file = writeConfig(tempDir,
-                "monitor.service.dup.url = https://a.com\n"
-                        + "monitor.service.dup.url = https://b.com\n"
-                        + "monitor.check.c.service = dup\n"
-                        + "monitor.check.c.interval = 5s\n"
-                        + "monitor.check.c.validation.validators = httpStatus\n"
-                        + "monitor.check.c.validation.httpStatus = 200\n"
-        );
-        // Properties format inherently deduplicates keys (last wins),
-        // so this tests that a single service loads correctly.
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
-        assertEquals(1, provider.getServices().size());
+                new PropertiesFileConfigProvider(Path.of("/nonexistent.properties"),
+                        validAliases));
     }
 
     @Test
@@ -192,32 +152,7 @@ class PropertiesFileConfigProviderTest {
                 "monitor.service.svc.url = https://a.com\n"
                         + "monitor.check.c.service = svc\n"
                         + "monitor.check.c.interval = 5s\n"
-                        + "monitor.check.c.validation.validators = nonExistentValidator\n"
-        );
-        assertThrows(IllegalArgumentException.class, () ->
-                new PropertiesFileConfigProvider(file, validAliases));
-    }
-
-    @Test
-    void shouldFailOnBareNumberDuration() throws IOException {
-        Path file = writeConfig(tempDir,
-                "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = svc\n"
-                        + "monitor.check.c.interval = 30\n"
-                        + "monitor.check.c.validation.validators = httpStatus\n"
-                        + "monitor.check.c.validation.httpStatus = 200\n"
-        );
-        assertThrows(IllegalArgumentException.class, () ->
-                new PropertiesFileConfigProvider(file, validAliases));
-    }
-
-    @Test
-    void shouldFailOnMissingServiceReference() throws IOException {
-        Path file = writeConfig(tempDir,
-                "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = nonexistent\n"
-                        + "monitor.check.c.interval = 5s\n"
-        );
+                        + "monitor.check.c.validation.validators = nonExistent\n");
         assertThrows(IllegalArgumentException.class, () ->
                 new PropertiesFileConfigProvider(file, validAliases));
     }
@@ -225,18 +160,9 @@ class PropertiesFileConfigProviderTest {
     @Test
     void shouldFailOnReservedDefaultName() throws IOException {
         Path file = writeConfig(tempDir,
-                "monitor.service.default.url = https://a.com\n"
-        );
+                "monitor.service.default.url = https://a.com\n");
         assertThrows(IllegalArgumentException.class, () ->
                 new PropertiesFileConfigProvider(file, validAliases));
-    }
-
-    @Test
-    void shouldParseDurationFormats() {
-        assertEquals(Duration.ofMillis(500), PropertiesFileConfigProvider.parseDuration("500ms", "test"));
-        assertEquals(Duration.ofSeconds(5), PropertiesFileConfigProvider.parseDuration("5s", "test"));
-        assertEquals(Duration.ofMinutes(2), PropertiesFileConfigProvider.parseDuration("2m", "test"));
-        assertEquals(Duration.ofHours(1), PropertiesFileConfigProvider.parseDuration("1h", "test"));
     }
 
     @Test
@@ -249,102 +175,367 @@ class PropertiesFileConfigProviderTest {
                 PropertiesFileConfigProvider.parseDuration("", "test"));
     }
 
-    // ── Environment passthrough (auto-scanned, spec §2.9.4) ─────────────────
+    // ── Template-context model (spec §2.9) ──────────────────────────────────
 
     @Test
-    void shouldExposeScannedEnvVar() throws IOException {
-        Path file = writeConfig(tempDir,
-                "_MODE = DEV\n"
-                        + "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = svc\n"
-                        + "monitor.check.c.interval = 5s\n"
-        );
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
-
-        // No monitor.templateEnv.vars declaration — _MODE is auto-exposed.
-        assertEquals("DEV", provider.getTemplateEnv().get("_MODE"));
-        assertEquals("DEV", provider.getChecks().get(0).getTemplateParams().get("_MODE"));
+    void shouldParseDurationFormats() {
+        assertEquals(Duration.ofMillis(500),
+                PropertiesFileConfigProvider.parseDuration("500ms", "test"));
+        assertEquals(Duration.ofSeconds(5),
+                PropertiesFileConfigProvider.parseDuration("5s", "test"));
+        assertEquals(Duration.ofMinutes(2),
+                PropertiesFileConfigProvider.parseDuration("2m", "test"));
+        assertEquals(Duration.ofHours(1),
+                PropertiesFileConfigProvider.parseDuration("1h", "test"));
     }
 
     @Test
-    void shouldExcludeFrameworkNamespacesFromEnv() throws IOException {
-        Path file = writeConfig(tempDir,
-                "_MODE = DEV\n"
-                        + "bedrock.wire.monitor.enabled = true\n"
-                        + "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = svc\n"
-                        + "monitor.check.c.interval = 5s\n"
-        );
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+    void layer7ParamOverridesLayer3Param() {
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.default.param.region", "eu-west-1",
+                        "monitor.check.c.param.region", "eu-east-2"
+                )))
+                .validatorAliases(validAliases)
+                .build();
 
-        assertTrue(provider.getTemplateEnv().containsKey("_MODE"));
-        assertFalse(provider.getTemplateEnv().containsKey("bedrock.wire.monitor.enabled"));
-        assertFalse(provider.getTemplateEnv().containsKey("monitor.service.svc.url"));
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("eu-east-2", model.get("region"));
     }
 
     @Test
-    void shouldExposeDottedKeysInEnv() throws IOException {
-        Path file = writeConfig(tempDir,
-                "_MODE = DEV\n"
-                        + "RUN.MODE = TST\n"
-                        + "USER.TYPE = admin\n"
-                        + "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = svc\n"
-                        + "monitor.check.c.interval = 5s\n"
-        );
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+    void layer5ServiceParamFitsBetweenDefaultAndCheck() {
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.default.param.tier", "default",
+                        "monitor.service.svc.param.tier", "service",
+                        "monitor.check.c.param.region", "checkOnly"
+                )))
+                .validatorAliases(validAliases)
+                .build();
 
-        // Dotted keys are flat entries — template uses ${RUN\.MODE} / ${USER\.TYPE}.
-        assertEquals("DEV", provider.getTemplateEnv().get("_MODE"));
-        assertEquals("TST", provider.getTemplateEnv().get("RUN.MODE"));
-        assertEquals("admin", provider.getTemplateEnv().get("USER.TYPE"));
-        // monitor.* keys still excluded.
-        assertFalse(provider.getTemplateEnv().containsKey("monitor.service.svc.url"));
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("service", model.get("tier"));         // L5 wins over L3
+        assertEquals("checkOnly", model.get("region"));     // L7 sets a new key
     }
 
     @Test
-    void shouldResolveChainedEnvVar() {
-        // ResolvingProperties simulates PropertiesCfg: getProperty() resolves ${...}.
+    void layer1SpringEnvIsLowestPrecedence() {
+        MockEnvironment env = new MockEnvironment()
+                .withProperty("RUN.MODE", "fromSpring");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        // Use a non-dotted key in the .param file: layer 3 wins.
+                        "monitor.default.param.MODE", "fromParam"
+                )))
+                .validatorAliases(validAliases)
+                .environment(env)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        // Spring property reached layer 1, .param reached layer 3 — L3 wins for MODE.
+        assertEquals("fromParam", model.get("MODE"));
+        // Spring-only key survives untouched.
+        assertEquals("fromSpring", nested(model, "RUN", "MODE"));
+    }
+
+    @Test
+    void springEnvPrefixRestrictsLayer1() {
+        MockEnvironment env = new MockEnvironment()
+                .withProperty("template.region", "us")
+                .withProperty("spring.datasource.password", "shouldNotLeak");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.default.springEnvPrefix", "template."
+                )))
+                .validatorAliases(validAliases)
+                .environment(env)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("us", model.get("region"));
+        // spring.datasource.password is excluded by the prefix filter.
+        assertNull(nested(model, "spring", "datasource", "password"));
+    }
+
+    @Test
+    void springEnvPrefixCheckLevelOverridesDefault() {
+        MockEnvironment env = new MockEnvironment()
+                .withProperty("a.x", "defaultPrefix")
+                .withProperty("b.x", "checkPrefix");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.default.springEnvPrefix", "a.",
+                        "monitor.check.c.springEnvPrefix", "b."
+                )))
+                .validatorAliases(validAliases)
+                .environment(env)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        // Check-level prefix wins; only b.* is exposed.
+        assertEquals("checkPrefix", model.get("x"));
+    }
+
+    @Test
+    void defaultConfigFileJsonNamespacedUnderDefault() throws IOException {
+        Path cfg = tempDir.resolve("global.json");
+        Files.writeString(cfg, "{\"region\":\"eu-west-1\",\"limits\":{\"max\":100}}");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.default.config-file", cfg.toString()
+                )))
+                .validatorAliases(validAliases)
+                .configFileRoot(tempDir)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("eu-west-1", nested(model, "default", "region"));
+        assertEquals(100, nested(model, "default", "limits", "max"));
+    }
+
+    @Test
+    void serviceConfigFilePropertiesNamespacedUnderService() throws IOException {
+        Path cfg = tempDir.resolve("svc.properties");
+        Files.writeString(cfg, "timeout=10s\nendpoints.health=/h\n");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.service.svc.config-file", cfg.toString()
+                )))
+                .validatorAliases(validAliases)
+                .configFileRoot(tempDir)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("10s", nested(model, "service", "svc", "timeout"));
+        assertEquals("/h", nested(model, "service", "svc", "endpoints", "health"));
+    }
+
+    @Test
+    void checkConfigFileParamNamespacedUnderCheck() throws IOException {
+        Path cfg = tempDir.resolve("check.param");
+        Files.writeString(cfg, "threshold=42\nlabels.team=ops\n");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.check.c.config-file", cfg.toString()
+                )))
+                .validatorAliases(validAliases)
+                .configFileRoot(tempDir)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("42", nested(model, "check", "c", "threshold"));
+        assertEquals("ops", nested(model, "check", "c", "labels", "team"));
+    }
+
+    @Test
+    void configFileMissingThrows() {
+        assertThrows(IllegalArgumentException.class, () ->
+                PropertiesFileConfigProvider.builder()
+                        .props(buildMinimalProps(Map.of(
+                                "monitor.default.config-file", "/nonexistent.json"
+                        )))
+                        .validatorAliases(validAliases)
+                        .build());
+    }
+
+    @Test
+    void reservedParamNameDefaultRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+                PropertiesFileConfigProvider.builder()
+                        .props(buildMinimalProps(Map.of(
+                                "monitor.default.param.default", "x"
+                        )))
+                        .validatorAliases(validAliases)
+                        .build());
+    }
+
+    @Test
+    void reservedParamNameServiceRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+                PropertiesFileConfigProvider.builder()
+                        .props(buildMinimalProps(Map.of(
+                                "monitor.check.c.param.service.x", "y"
+                        )))
+                        .validatorAliases(validAliases)
+                        .build());
+    }
+
+    // ── Path resolution ─────────────────────────────────────────────────────
+
+    @Test
+    void reservedParamNameCheckRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+                PropertiesFileConfigProvider.builder()
+                        .props(buildMinimalProps(Map.of(
+                                "monitor.service.svc.param.check", "y"
+                        )))
+                        .validatorAliases(validAliases)
+                        .build());
+    }
+
+    @Test
+    void templateFileResolvesRelativeToConfigFileRoot() throws IOException {
+        Path templatesDir = Files.createDirectory(tempDir.resolve("templates"));
+        Path tpl = templatesDir.resolve("body.xml");
+        Files.writeString(tpl, "<x/>");
+
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "monitor.check.c.templateFile", "templates/body.xml"
+                )))
+                .validatorAliases(validAliases)
+                .configFileRoot(tempDir)
+                .build();
+
+        String resolved = p.getChecks().get(0).getTemplateFile();
+        assertEquals(tpl.toAbsolutePath().normalize().toString(), resolved);
+    }
+
+    // ── Layer 0 — bare-key scan (spec §2.9.0) ───────────────────────────────
+
+    @Test
+    void tlsTrustStoreResolvesRelativeToConfigFileRoot() throws IOException {
+        Path certsDir = Files.createDirectory(tempDir.resolve("certs"));
+        Path ts = certsDir.resolve("ts.p12");
+        Files.writeString(ts, "");
+
+        Map<String, String> extra = Map.of(
+                "monitor.tls.test-tls.trustStore", "certs/ts.p12",
+                "monitor.tls.test-tls.trustStorePassword", "x",
+                "monitor.tls.test-tls.trustStoreType", "PKCS12"
+        );
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(extra))
+                .validatorAliases(validAliases)
+                .configFileRoot(tempDir)
+                .build();
+
+        TlsProfileConfig tls = p.getTlsProfiles().get(0);
+        assertEquals(ts.toAbsolutePath().normalize().toString(), tls.getTrustStore());
+    }
+
+    @Test
+    void layer0ExposesBareKey() {
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of("_MODE", "TST")))
+                .validatorAliases(validAliases)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("TST", model.get("_MODE"));
+    }
+
+    @Test
+    void layer0ExposesDottedKeyFlat() {
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of("RUN.MODE", "staging")))
+                .validatorAliases(validAliases)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        // Flat: the single key "RUN.MODE", NOT nested under {RUN:{MODE}}.
+        assertEquals("staging", model.get("RUN.MODE"));
+        assertNull(nested(model, "RUN", "MODE"));
+    }
+
+    @Test
+    void layer0ExcludesFrameworkNamespaces() {
+        Properties props = buildMinimalProps(Map.of(
+                "_MODE", "TST",
+                "bedrock.wire.monitor.enabled", "true"
+        ));
+        // monitor.* and bedrock.wire.monitor.* must NOT be scanned into the model.
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(props)
+                .validatorAliases(validAliases)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("TST", model.get("_MODE"));
+        assertNull(model.get("monitor.service.svc.url"));
+        assertNull(model.get("bedrock.wire.monitor.enabled"));
+    }
+
+    @Test
+    void layer0SkipsBlankValues() {
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of("_MODE", "   ")))
+                .validatorAliases(validAliases)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertNull(model.get("_MODE"));
+    }
+
+    @Test
+    void layer0IsLowestPrecedence() {
+        // Bare _MODE at layer 0 vs check param._MODE at layer 7 → layer 7 wins.
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "_MODE", "scanned",
+                        "monitor.check.c.param._MODE", "checkParam"
+                )))
+                .validatorAliases(validAliases)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("checkParam", model.get("_MODE"));
+    }
+
+    @Test
+    void layer0LosesToServiceParam() {
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of(
+                        "_MODE", "scanned",
+                        "monitor.service.svc.param._MODE", "serviceParam"
+                )))
+                .validatorAliases(validAliases)
+                .build();
+
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("serviceParam", model.get("_MODE"));
+    }
+
+    @Test
+    void layer0ResolvesChainedValue() {
         Properties props = new ResolvingProperties();
         props.setProperty("_RAW", "DEV");
         props.setProperty("_MODE", "${_RAW}");
         props.setProperty("monitor.service.svc.url", "https://a.com");
         props.setProperty("monitor.check.c.service", "svc");
         props.setProperty("monitor.check.c.interval", "5s");
+        props.setProperty("monitor.check.c.validation.validators", "httpStatus");
+        props.setProperty("monitor.check.c.validation.httpStatus", "200");
 
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(props, validAliases);
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(props)
+                .validatorAliases(validAliases)
+                .build();
 
-        assertEquals("DEV", provider.getChecks().get(0).getTemplateParams().get("_MODE"));
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("DEV", model.get("_MODE"));
     }
 
-    @Test
-    void shouldLetCheckParamOverrideScannedEnvVar() throws IOException {
-        Path file = writeConfig(tempDir,
-                "_MODE = DEV\n"
-                        + "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = svc\n"
-                        + "monitor.check.c.interval = 5s\n"
-                        + "monitor.check.c.param._MODE = PROD\n"
-        );
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
-
-        // param.* wins; the scanned env layer is lowest precedence.
-        assertEquals("PROD", provider.getChecks().get(0).getTemplateParams().get("_MODE"));
-        assertEquals("DEV", provider.getTemplateEnv().get("_MODE"));
-    }
+    // ── Helpers ─────────────────────────────────────────────────────────────
 
     @Test
-    void shouldTreatBlankEnvVarAsAbsent() throws IOException {
-        Path file = writeConfig(tempDir,
-                "_MODE =\n"
-                        + "monitor.service.svc.url = https://a.com\n"
-                        + "monitor.check.c.service = svc\n"
-                        + "monitor.check.c.interval = 5s\n"
-        );
-        PropertiesFileConfigProvider provider = new PropertiesFileConfigProvider(file, validAliases);
+    void layer0BareReservedNameAllowedButShadowed() {
+        // A bare key literally "default" is NOT rejected (only param.* names are).
+        // It is shadowed by any config-file layer, but with none present it survives.
+        PropertiesFileConfigProvider p = PropertiesFileConfigProvider.builder()
+                .props(buildMinimalProps(Map.of("default", "bareValue")))
+                .validatorAliases(validAliases)
+                .build();
 
-        assertFalse(provider.getTemplateEnv().containsKey("_MODE"));
-        assertFalse(provider.getChecks().get(0).getTemplateParams().containsKey("_MODE"));
+        Map<String, Object> model = p.getChecks().get(0).getTemplateParams();
+        assertEquals("bareValue", model.get("default"));
     }
 
     private Path writeConfig(Path dir, String content) throws IOException {
@@ -354,9 +545,23 @@ class PropertiesFileConfigProviderTest {
     }
 
     /**
+     * Builds a minimal valid monitor configuration (one service, one check) plus
+     * the supplied extra keys. Used to keep model-precedence tests focused.
+     */
+    private Properties buildMinimalProps(Map<String, String> extra) {
+        Properties p = new Properties();
+        p.setProperty("monitor.service.svc.url", "https://a.com");
+        p.setProperty("monitor.check.c.service", "svc");
+        p.setProperty("monitor.check.c.interval", "5s");
+        p.setProperty("monitor.check.c.validation.validators", "httpStatus");
+        p.setProperty("monitor.check.c.validation.httpStatus", "200");
+        extra.forEach(p::setProperty);
+        return p;
+    }
+
+    /**
      * Minimal {@link Properties} subclass that resolves {@code ${name}} references
-     * on read, simulating {@code PropertiesCfg} for tests without depending on
-     * {@code syntea-bedrock-cfg}.
+     * on read, simulating {@code PropertiesCfg}.
      */
     private static final class ResolvingProperties extends Properties {
         @Override

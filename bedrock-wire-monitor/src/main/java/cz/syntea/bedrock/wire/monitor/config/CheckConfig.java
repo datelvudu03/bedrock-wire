@@ -20,6 +20,12 @@ import java.util.Map;
  * {@link #validators} contains the ordered list of validator aliases as defined
  * in {@code validation.validators}. The corresponding parameters are stored in
  * {@link #validationParams} with their {@code validation.} prefix stripped.
+ *
+ * <h3>Template parameters</h3>
+ * {@link #templateParams} is the fully resolved template model for this check,
+ * combining all seven precedence layers of the v3 template-context model
+ * (spec §2.9). The layers are merged at parse time so that {@code CheckRunner}
+ * needs only this single map at render time.
  */
 @Value
 @Builder(toBuilder = true)
@@ -119,19 +125,36 @@ public class CheckConfig {
     Map<String, String> validationParams = Map.of();
 
     /**
-     * Template substitution parameters from {@code monitor.check.<n>.param.*}.
-     * Keys are parameter names without the {@code param.} prefix.
-     * Never {@code null}; may be empty.
+     * Fully resolved template model for this check, combining all eight precedence
+     * layers of the v3 template-context model (spec §2.9):
+     *
+     * <ol start="0">
+     *   <li>Bare-key scan of the {@code .param} graph outside the framework
+     *       namespaces (flat) — lowest</li>
+     *   <li>Spring {@link org.springframework.core.env.Environment} (under
+     *       {@code springEnvPrefix}; nested)</li>
+     *   <li>{@code monitor.default.config-file} contents (namespaced under
+     *       {@code default.})</li>
+     *   <li>{@code monitor.default.param.*} (flat)</li>
+     *   <li>{@code monitor.service.<name>.config-file} contents (namespaced under
+     *       {@code service.<name>.})</li>
+     *   <li>{@code monitor.service.<name>.param.*} (flat)</li>
+     *   <li>{@code monitor.check.<name>.config-file} contents (namespaced under
+     *       {@code check.<name>.})</li>
+     *   <li>{@code monitor.check.<name>.param.*} (flat) — highest</li>
+     * </ol>
+     *
+     * <p>Higher layers override lower layers; nested maps are deep-merged. The
+     * {@code config-file} layers contribute namespaced sub-trees, so they do
+     * not collide with the flat {@code param.*} layers unless a {@code param.*}
+     * key is literally named {@code default}, {@code service}, or {@code check}
+     * — those three names are reserved at parse time and cause fail-fast.
+     *
+     * <p>Values are typed {@link Object} to allow nested {@link Map} structures
+     * from the Spring and {@code config-file} layers. {@code String} values are
+     * the common case (flat layers, scalar JSON values). Never {@code null};
+     * may be empty.
      */
     @Builder.Default
-    Map<String, String> templateParams = Map.of();
-
-    /**
-     * Monitor-global environment-passthrough variables resolved from
-     * {@code monitor.templateEnv.vars} (spec §2.9.4). These are also merged into
-     * {@link #templateParams} as the lowest-precedence layer; this field exposes
-     * them separately for diagnostics. Never {@code null}; may be empty.
-     */
-    @Builder.Default
-    Map<String, String> templateEnv = Map.of();
+    Map<String, Object> templateParams = Map.of();
 }
